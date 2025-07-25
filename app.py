@@ -11,8 +11,9 @@ except ImportError:
     pass
 
 # Read the Gemini API key from environment
-api_key = os.getenv("GEMINI_API_KEY")
-print("Key from env:", api_key)  # Debug print, remove if not needed
+api_key = st.secrets["GEMINI_API_KEY"]
+genai.configure(api_key=api_key)
+
 
 if not api_key:
     st.error("GEMINI_API_KEY not found in environment variables.")
