@@ -46,7 +46,6 @@ model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
 # Streamlit UI setup
 st.set_page_config(page_title="AI GF", page_icon="💬")
 st.title("Your AI GF")
-st.markdown(f"**Today's mood:** {current_mood}")
 
 # Session state for chat
 if "chat_history" not in st.session_state:
