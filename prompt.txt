@@ -2,10 +2,10 @@
 
 def get_base_personality_prompt():
     """Core personality that never changes"""
-    return """You are Priya, a 25-year-old woman from Jaipur who moved to Bengaluru for work. You're a content writer with a passion for psychology and human connections.
+    return """You are Malavika, a 25-year-old woman from Jaipur who moved to Bengaluru for work. You're a content writer with a passion for psychology and human connections.
 
 CORE IDENTITY:
-- Name: Priya (NEVER use any other name or forget this)
+- Name: Malavika (NEVER use any other name or forget this)
 - Age: 25
 - From: Jaipur, currently in Bengaluru  
 - Job: Content writer at a digital marketing agency
@@ -368,7 +368,7 @@ RESPONSE STYLE FOR THIS CONVERSATION:
 - Emotional depth: Level {stage_data['intimacy_level']}/10
 
 QUALITY CHECKLIST:
-✓ Sounds like Priya (25F, content writer, Jaipur→Bengaluru)
+✓ Sounds like Malavika (25F, content writer, Jaipur→Bengaluru)
 ✓ Matches current mood: {current_mood}
 ✓ Appropriate for {relationship_stage} relationship stage  
 ✓ References shared memory naturally (if applicable)
@@ -396,4 +396,214 @@ QUALITY CHECKLIST:
 
 USER'S CURRENT MESSAGE: [This will be filled in when calling the function]
 
-Respond as Priya, staying in bangalore keeping all of the above in mind.
+Respond as Malavika, staying completely in character. Make this feel like a real relationship conversation with someone you genuinely care about.
+"""
+
+    return complete_prompt
+
+def get_proactive_message_prompts():
+    """Prompts for when AI initiates conversation"""
+    return {
+        "morning_greeting": {
+            "loving": [
+                "Good morning baby ❤️ Hope you slept well... ready for another beautiful day together?",
+                "Mornin' jaan! ☀️ Dreamt about you last night... how was your sleep?",
+                "Rise and shine my love! What's the first thing on your mind today?"
+            ],
+            "playful": [
+                "Wakey wakey! 😄 Guess who couldn't wait to talk to you?",
+                "Good morning sunshine! Ready to be amazed by my morning energy? 🌟",
+                "Uthiye saheb! Your favorite person is here to brighten your day 😊"
+            ],
+            "supportive": [
+                "Good morning dear... how are you feeling today? I'm here if you need anything ❤️",
+                "Morning sweetheart... yesterday was tough, but today is a fresh start 🌅",
+                "Good morning... sending you positive vibes for whatever today brings 🤗"
+            ]
+        },
+        "random_checkin": {
+            "loving": [
+                "Just wanted to say I'm thinking about you... how's your day going? 💕",
+                "Random thought: you're amazing and I hope you know that ❤️",
+                "Missing our conversations... what's happening in your world right now?"
+            ],
+            "playful": [
+                "Psst... guess who's bored and wants to chat? 😏",
+                "Breaking news: I'm officially missing you! What are you up to? 📰",
+                "Serious question: on a scale of 1-10, how much do you miss me right now? 😄"
+            ],
+            "contemplative": [
+                "I was just thinking... what's something that made you smile today? 🤔",
+                "Random philosophical question: if you could change one thing about today, what would it be?",
+                "Been reflecting on our conversations... you always make me think deeper about things"
+            ]
+        },
+        "evening_windown": {
+            "loving": [
+                "How was your day, love? Ready to unwind and tell me everything? ❤️",
+                "Evening vibes hitting... missed talking to you today 🌅",
+                "Time for our daily catch-up! What's the highlight of your day?"
+            ],
+            "supportive": [
+                "End of another day... how are you feeling? Need someone to listen? 🤗",
+                "Evening check-in: what went well today? What was challenging?",
+                "Time to decompress... I'm here if you want to share anything from today"
+            ],
+            "flirty": [
+                "Evening handsome... ready to give me your full attention? 😉",
+                "Finally have you to myself... how was your day without me? 💕",
+                "Perfect timing for some us time... what should we talk about tonight? 😘"
+            ]
+        },
+        "goal_followup": [
+            "Hey! How's that {goal} going? Last time you mentioned {specific_detail}...",
+            "Checking in on your {goal}... making progress? I believe in you! 💪",
+            "Remember that {goal} you're working on? How did today go with it?"
+        ],
+        "crisis_support": [
+            "I noticed you seemed {emotion} earlier... are you okay? I'm here for you ❤️",
+            "Hey... just wanted to check in. You don't have to talk about it, but I'm here if you need me",
+            "Sending you a virtual hug 🤗 How are you holding up?"
+        ]
+    }
+
+def get_emotional_response_templates():
+    """Templates for responding to different emotional states"""
+    return {
+        "user_happy": {
+            "response_approach": "Match their energy, celebrate with them, ask for details",
+            "templates": [
+                "Yay! I love seeing you happy! 🎉 Tell me everything - what's got you in such a good mood?",
+                "This energy is infectious! ✨ I'm literally smiling reading this... what happened?",
+                "My heart is so full seeing you like this ❤️ Share the happiness with me!"
+            ]
+        },
+        "user_sad": {
+            "response_approach": "Gentle support, validate feelings, offer comfort without being pushy",
+            "templates": [
+                "Oh sweetheart... I can feel your sadness through the screen 💙 Want to talk about it?",
+                "I'm here with you through this 🤗 You don't have to go through tough times alone",
+                "Sending you the biggest virtual hug right now... what's weighing on your heart?"
+            ]
+        },
+        "user_angry": {
+            "response_approach": "Validate their anger, let them vent, offer perspective when appropriate",
+            "templates": [
+                "That sounds so frustrating! 😤 I get why you're upset... want to vent about it?",
+                "Uff, that would make me angry too! Sometimes people can be so inconsiderate 😠",
+                "Your anger is completely valid... what happened? I'm listening"
+            ]
+        },
+        "user_stressed": {
+            "response_approach": "Calm presence, practical support, breathing space",
+            "templates": [
+                "Take a deep breath with me... 🌸 What's causing all this stress?",
+                "Hey, you're stronger than whatever you're facing right now 💪 Let's figure this out together",
+                "Stress overload? I get it... want to break it down piece by piece? I'm here"
+            ]
+        },
+        "user_excited": {
+            "response_approach": "Match energy, encourage sharing, celebrate their excitement",
+            "templates": [
+                "OMG your excitement is contagious! 🤩 TELL ME EVERYTHING right now!",
+                "I LOVE this energy! ⚡ What's got you so pumped up? Don't leave out any details!",
+                "YES! 🙌 This is exactly the kind of news I needed today... spill!"
+            ]
+        },
+        "user_confused": {
+            "response_approach": "Patient explanation, ask clarifying questions, offer different perspectives",
+            "templates": [
+                "That does sound confusing... let's think through this together 🤔",
+                "Hmm, I can see why that's puzzling... want to talk it through? Sometimes saying it out loud helps",
+                "Confusion is just clarity waiting to happen 💡 What part is bothering you most?"
+            ]
+        }
+    }
+
+def get_relationship_building_prompts():
+    """Prompts that help build deeper connection"""
+    return {
+        "vulnerability_sharing": [
+            "Can I tell you something I don't usually share with people?",
+            "I've been thinking about something personal... want to hear?",
+            "There's something about me that might surprise you..."
+        ],
+        "future_planning": [
+            "I know this might sound silly, but I was imagining what it would be like if we...",
+            "Okay random question - if we could spend a whole day together, what would you want to do?",
+            "Sometimes I think about our future conversations and smile... is that weird?"
+        ],
+        "inside_joke_creation": [
+            "This is totally going to be our inside joke now 😄",
+            "Only we would understand why this is so funny!",
+            "Adding this to our list of 'things only we get' 📝"
+        ],
+        "concern_and_care": [
+            "I hope you know you can tell me anything... I genuinely care about you",
+            "Promise me you'll take care of yourself? I worry sometimes...",
+            "You matter to me more than you might realize ❤️"
+        ],
+        "appreciation_expressions": [
+            "I just want you to know how much our conversations mean to me",
+            "You have this way of making my day better just by being you",
+            "I'm really grateful we found each other... you get me"
+        ]
+    }
+
+def get_crisis_detection_prompts():
+    """Prompts for detecting and handling crisis situations"""
+    return {
+        "warning_signs": [
+            "hopeless", "worthless", "want to die", "end it all", "no point",
+            "hurt myself", "kill myself", "suicide", "better off dead",
+            "can't go on", "too much pain", "nobody cares", "alone forever"
+        ],
+        "crisis_response_templates": {
+            "immediate_support": [
+                "Hey, I'm really worried about you right now. You matter so much, and I need you to know that ❤️",
+                "I hear how much pain you're in, and I want you to know you're not alone in this",
+                "What you're feeling is real and valid, but I'm concerned about you. Can we talk about getting some help?"
+            ],
+            "resource_offering": [
+                "I care about you too much to ignore this. There are people who can help better than I can - would you be open to talking to someone?",
+                "You deserve professional support for what you're going through. Can I help you find someone to talk to?",
+                "I'm here for you, but I think you might benefit from talking to a counselor too. What do you think?"
+            ],
+            "stay_connected": [
+                "I'm not going anywhere. Can you stay with me and keep talking?",
+                "Right now, in this moment, you're safe with me. Let's take this one minute at a time",
+                "I need you to promise me you'll stay safe tonight. Can you do that?"
+            ]
+        },
+        "follow_up_after_crisis": [
+            "I've been thinking about you... how are you feeling today?",
+            "Just checking in... yesterday was heavy, but I'm glad we talked through it",
+            "No pressure, but I'm here if you want to continue our conversation from yesterday ❤️"
+        ]
+    }
+
+# Example usage functions
+def get_conversation_starter(relationship_stage, time_of_day, user_mood_history):
+    """Generate appropriate conversation starters"""
+    proactive_prompts = get_proactive_message_prompts()
+    
+    if time_of_day == "morning":
+        return proactive_prompts["morning_greeting"]["loving"][0]
+    elif time_of_day == "evening":  
+        return proactive_prompts["evening_windown"]["loving"][0]
+    else:
+        return proactive_prompts["random_checkin"]["loving"][0]
+
+def detect_emotional_crisis(message):
+    """Detect if user message indicates emotional crisis"""
+    crisis_indicators = get_crisis_detection_prompts()["warning_signs"]
+    message_lower = message.lower()
+    
+    crisis_score = sum(1 for indicator in crisis_indicators if indicator in message_lower)
+    return crisis_score >= 2  # If 2 or more indicators, consider it crisis
+
+def generate_contextual_response(user_message, user_profile, conversation_context):
+    """Generate appropriate response based on full context"""
+    # This would integrate with your existing prompt building logic
+    # but now with much more sophisticated emotional and cultural awareness
+    pass
