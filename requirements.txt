@@ -2,3 +2,5 @@ streamlit==1.35.0
 google-generativeai==0.4.1
 python-dotenv==1.0.1
 supabase
+tiktoken
+uuid
