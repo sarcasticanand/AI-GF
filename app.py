@@ -32,8 +32,10 @@ model = genai.GenerativeModel("models/gemini-1.5-pro-latest")  # Cache model for
 # Configure Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Current date for contextual moods (e.g., festivals)
+# Current date and time for contextual moods (e.g., festivals, realistic plans)
 CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")  # Outputs dynamic date like '2025-07-26'
+CURRENT_TIME = datetime.now().strftime("%H:%M")  # e.g., '18:49' for 6:49 PM
+current_hour = datetime.now().hour
 
 # ---------------------------
 # 2. Mood Definitions (Optimized for Gemini Parsing)
@@ -61,6 +63,8 @@ if "current_mood" not in st.session_state:
     st.session_state.current_mood = random.choice(MOODS)
 if "last_input_time" not in st.session_state:
     st.session_state.last_input_time = time.time()
+if "conversation_state" not in st.session_state:
+    st.session_state.conversation_state = {}  # e.g., {'confirmed_place': None, 'confirmed_time': None}
 
 # Load and format personality prompt (after session state to avoid errors)
 with open("prompt.txt", "r") as f:
@@ -85,30 +89,41 @@ user_input = st.chat_input("Say something to your companion...")
 # 4. Supabase Functions for Memory
 # ---------------------------
 def get_history(user_id):
-    """Fetch last 10 messages from Supabase for context."""
+    """Fetch last 10 messages from Supabase for context, including latest user_name."""
     try:
         response = supabase.table('chats') \
-            .select('user_message, ai_response') \
+            .select('user_message, ai_response, user_name') \
             .eq('user_id', user_id) \
             .order('timestamp', desc=True) \
             .limit(10) \
             .execute()
         if response.data:
-            return "\n".join([f"You: {row['user_message']}\nHer: {row['ai_response']}" for row in response.data[::-1]])
-        return "No prior chat history."
+            history_text = "\n".join([f"You: {row['user_message']}\nHer: {row['ai_response']}" for row in response.data[::-1]])
+            user_name = ""
+            for row in response.data:
+                if row.get('user_name'):
+                    user_name = row['user_name']
+                    break  # Use most recent name
+            return history_text, user_name
+        return "No prior chat history.", ""
     except Exception as e:
         st.warning(f"Error loading history: {str(e)}")
-        return "No prior chat history."  # Fallback
+        return "No prior chat history.", ""  # Fallback
 
 def save_chat(user_id, user_message, ai_response):
-    """Save chat message to Supabase with timestamp."""
+    """Save chat message to Supabase with timestamp and extract name if mentioned."""
     try:
-        supabase.table('chats').insert({
+        insert_data = {
             'user_id': user_id,
             'user_message': user_message,
             'ai_response': ai_response,
             'timestamp': datetime.now().isoformat()
-        }).execute()
+        }
+        # Simple name extraction (e.g., from "my name is X")
+        name_match = re.search(r'my name is (\w+ \w+)', user_message, re.IGNORECASE)
+        if name_match:
+            insert_data['user_name'] = name_match.group(1)
+        supabase.table('chats').insert(insert_data).execute()
     except Exception as e:
         st.warning(f"Error saving chat: {str(e)}")
 
@@ -136,7 +151,7 @@ if user_input:
     st.session_state.last_input_time = time.time()
 
     # Fetch and possibly "forget" history (10% chance)
-    chat_history_text = get_history(st.session_state.user_id)
+    chat_history_text, user_name = get_history(st.session_state.user_id)
     if random.random() < 0.1 and chat_history_text != "No prior chat history.":
         chat_history_text = re.sub(r'(your \w+)', 'your [forgotten detail]', chat_history_text, count=1)
 
@@ -148,14 +163,20 @@ if user_input:
     chat_history_text = truncate(chat_history_text)
     user_input = truncate(user_input)
 
-    # Possible unavailability (5% chance, Indian contexts)
+    # Detect frustration and force supportive mood
+    frustration_keywords = ["wtf", "why", "again", "forgot"]
+    if any(word in user_input.lower() for word in frustration_keywords):
+        st.session_state.current_mood = [m for m in MOODS if "Supportive" in m][0]  # Force supportive
+
+    # Possible unavailability (5% base, higher after 7 PM)
     indian_reasons = ["at a family puja", "stuck in monsoon traffic", "helping with Diwali prep", "on a work deadline", "visiting relatives"]
-    if random.random() < 0.05:
+    unavail_chance = 0.2 if current_hour >= 19 else 0.05
+    if random.random() < unavail_chance:
         reason = random.choice(indian_reasons)
         response = f"Sorry yaar, I'm {reason} right now. Let's chat later? 😊"
     else:
-        # Mood shift (20% chance)
-        if random.random() < 0.2:
+        # Mood shift (20% chance, unless frustration override)
+        if random.random() < 0.2 and not any(word in user_input.lower() for word in frustration_keywords):
             st.session_state.current_mood = random.choice(MOODS)
 
         # Prepare full prompt with realism instructions
@@ -163,8 +184,11 @@ if user_input:
 {personality_prompt}
 
 Recent history: {chat_history_text}
-Current date: {CURRENT_DATE} (reference for festivals or context).
+Current date: {CURRENT_DATE} and time: {CURRENT_TIME} (adapt plans realistically, e.g., don't suggest past times).
+User's name (if known): {user_name} - always use it correctly after learning.
+Conversation state: {st.session_state.conversation_state} (use to avoid repeating questions; pivot if confirmed).
 If [forgotten detail] in history, ask for clarification naturally.
+If user seems frustrated (e.g., words like 'wtf'), respond empathetically, apologize if needed, and de-escalate.
 Evolve preferences based on history (e.g., grow to like user's hobbies).
 
 Respond to: You: {user_input}
@@ -193,3 +217,10 @@ Her:
     # Save locally and to Supabase
     st.session_state.chat_history.append({"user": user_input, "ai": response})
     save_chat(st.session_state.user_id, user_input, response)
+
+    # Update conversation state (e.g., detect confirmations)
+    if "toit" in user_input.lower() and "confirmed_place" not in st.session_state.conversation_state:
+        st.session_state.conversation_state['confirmed_place'] = "Toit"
+    time_match = re.search(r'\d+ baje', user_input)
+    if time_match and "confirmed_time" not in st.session_state.conversation_state:
+        st.session_state.conversation_state['confirmed_time'] = time_match.group(0)
