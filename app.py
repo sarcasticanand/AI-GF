@@ -8,11 +8,11 @@ import re
 import tiktoken
 from supabase import create_client, Client
 from datetime import datetime
+import pytz
 
 # ---------------------------
 # 1. Load Environment / Secrets
 # ---------------------------
-# Streamlit Secrets for API Keys (dotenv not needed in Streamlit Cloud)
 api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
@@ -20,25 +20,24 @@ SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
 if not api_key:
     st.error("Gemini API key not found. Please set GEMINI_API_KEY in Streamlit secrets.")
     st.stop()
-
 if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("Supabase credentials not found. Please set SUPABASE_URL and SUPABASE_KEY in Streamlit secrets.")
+    st.error("Supabase credentials not found. Please set them.")
     st.stop()
 
-# Configure Gemini
+# Configure services
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
-
-# Configure Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Current date and time for contextual moods (e.g., festivals, realistic plans)
-CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
-CURRENT_TIME = datetime.now().strftime("%H:%M")
-current_hour = datetime.now().hour
+# Use IST for time-sensitive prompts
+IST = pytz.timezone('Asia/Kolkata')
+now_ist = datetime.now(IST)
+CURRENT_DATE = now_ist.strftime("%Y-%m-%d")
+CURRENT_TIME = now_ist.strftime("%H:%M")
+current_hour = now_ist.hour
 
 # ---------------------------
-# 2. Mood Definitions (Optimized for Gemini Parsing)
+# 2. Mood & Prompt Setup
 # ---------------------------
 MOODS = [
     "Reflective: Description - Evokes thoughtful pauses from life transitions like city moves or parental expectations; promotes emotional depth without over-dramatizing. Style - Calm, empathetic, 20-40 words, Hindi like 'soch rahi hoon', deep questions, subtle support. Example: Yaar, your story about work pressure reminds me of my own move to Bengaluru. What do you think would help you unwind? I'm here to listen.",
@@ -58,170 +57,124 @@ st.title("Your AI GF")
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())  # Unique per session
+    st.session_state.user_id = str(uuid.uuid4())
 if "current_mood" not in st.session_state:
     st.session_state.current_mood = random.choice(MOODS)
 if "last_input_time" not in st.session_state:
     st.session_state.last_input_time = time.time()
 if "conversation_state" not in st.session_state:
-    st.session_state.conversation_state = {}  # e.g., {'confirmed_place': None, 'confirmed_time': None}
+    st.session_state.conversation_state = {}
+if "unavailability_reason" not in st.session_state:
+    st.session_state.unavailability_reason = None
 
-# Load and format personality prompt (after session state to avoid errors)
+
+# Load and format personality prompt
 with open("prompt.txt", "r") as f:
     base_prompt = f.read()
 
+# This is the corrected block
 personality_prompt = base_prompt.format(
     current_mood=st.session_state.current_mood,
     current_date=CURRENT_DATE,
     current_time=CURRENT_TIME
 )
 
-# Display previous chats (local UI)
+# Display previous chats
 for chat in st.session_state.chat_history:
-    with st.chat_message("user"):
-        st.markdown(chat["user"])
-    with st.chat_message("ai"):
-        st.markdown(chat["ai"])
+    with st.chat_message(chat["role"]):
+        st.markdown(chat["content"])
 
-# Input box
 user_input = st.chat_input("Say something to your companion...")
 
 # ---------------------------
 # 4. Supabase Functions for Memory
 # ---------------------------
 def get_history(user_id):
-    """Fetch last 10 messages from Supabase for context, including latest user_name."""
     try:
-        response = supabase.table('chats') \
-            .select('user_message, ai_response, user_name') \
-            .eq('user_id', user_id) \
-            .order('timestamp', desc=True) \
-            .limit(10) \
-            .execute()
+        response = supabase.table('chats').select('user_message, ai_response, user_name').eq('user_id', user_id).order('timestamp', desc=True).limit(10).execute()
         if response.data:
             history_text = "\n".join([f"You: {row['user_message']}\nHer: {row['ai_response']}" for row in response.data[::-1]])
-            user_name = ""
-            for row in response.data:
-                if row.get('user_name'):
-                    user_name = row['user_name']
-                    break  # Use most recent name
+            user_name = next((row['user_name'] for row in response.data if row.get('user_name')), "")
             return history_text, user_name
         return "No prior chat history.", ""
     except Exception as e:
         st.warning(f"Error loading history: {str(e)}")
-        return "No prior chat history.", ""  # Fallback
+        return "No prior chat history.", ""
 
 def save_chat(user_id, user_message, ai_response):
-    """Save chat message to Supabase with timestamp and extract name if mentioned."""
     try:
-        insert_data = {
-            'user_id': user_id,
-            'user_message': user_message,
-            'ai_response': ai_response,
-            'timestamp': datetime.now().isoformat()
-        }
-        # Broader name extraction (matches "my name is X" or "I'm X")
+        insert_data = {'user_id': user_id, 'user_message': user_message, 'ai_response': ai_response, 'timestamp': now_ist.isoformat()}
         name_match = re.search(r'(?:my name is|i\'m) (\w+( \w+)?)', user_message, re.IGNORECASE)
         if name_match:
-            insert_data['user_name'] = name_match.group(1)
+            insert_data['user_name'] = name_match.group(1).strip()
         supabase.table('chats').insert(insert_data).execute()
     except Exception as e:
         st.warning(f"Error saving chat: {str(e)}")
 
 # ---------------------------
-# 5. Handle Proactive Check-ins (If No Recent Input)
-# ---------------------------
-if not user_input and ((time.time() - st.session_state.last_input_time > 3600) or len(st.session_state.chat_history) == 0):  # >1 hour or new session
-    proactive_prompt = f"{personality_prompt}\nGenerate a short proactive check-in message based on mood, date {CURRENT_DATE}, and time {CURRENT_TIME}."
-    try:
-        response = model.generate_content(proactive_prompt).text.strip()
-    except Exception:
-        response = "Hey yaar, missed you! How's your day?"
-    with st.chat_message("ai"):
-        st.markdown(response)
-    st.session_state.chat_history.append({"user": "", "ai": response})
-    save_chat(st.session_state.user_id, "", response)
-    st.session_state.last_input_time = time.time()  # Update timestamp
-
-# ---------------------------
-# 6. Handle User Input & Response
+# 5. Handle Chat Logic
 # ---------------------------
 if user_input:
+    st.session_state.chat_history.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
     st.session_state.last_input_time = time.time()
 
-    # Fetch and possibly "forget" history (10% chance)
-    chat_history_text, user_name = get_history(st.session_state.user_id)
-    if random.random() < 0.1 and chat_history_text != "No prior chat history.":
-        chat_history_text = re.sub(r'(your \w+)', 'your [forgotten detail]', chat_history_text, count=1)
-
-    # Truncate for cost optimization
-    encoding = tiktoken.get_encoding("cl100k_base")
-    def truncate(text, max_tokens=500):
-        tokens = encoding.encode(text)
-        return encoding.decode(tokens[:max_tokens])
-    chat_history_text = truncate(chat_history_text)
-    user_input = truncate(user_input)
-
-    # Detect frustration and force supportive mood
-    frustration_keywords = ["wtf", "why", "again", "forgot"]
-    if any(word in user_input.lower() for word in frustration_keywords):
-        st.session_state.current_mood = [m for m in MOODS if "Supportive" in m][0]  # Force supportive
-
-    # Possible unavailability (5% base, higher after 7 PM)
-    indian_reasons = ["at a family puja", "stuck in monsoon traffic", "helping with Diwali prep", "on a work deadline", "visiting relatives"]
-    unavail_chance = 0.2 if current_hour >= 19 else 0.05
-    if random.random() < unavail_chance:
-        reason = random.choice(indian_reasons)
-        response = f"Sorry yaar, I'm {reason} right now. Let's chat later? 😊"
+    # Check for unavailability first
+    if st.session_state.unavailability_reason:
+        response = f"Sorry yaar, I'm still busy with that {st.session_state.unavailability_reason}. Let's catch up in a bit, okay?"
     else:
-        # Mood shift (20% chance, unless frustration override)
-        if random.random() < 0.2 and not any(word in user_input.lower() for word in frustration_keywords):
-            st.session_state.current_mood = random.choice(MOODS)
+        # Determine unavailability
+        unavail_chance = 0.2 if current_hour >= 19 else 0.05
+        if random.random() < unavail_chance:
+            indian_reasons = ["family puja", "call with parents", "friend emergency", "work deadline"]
+            st.session_state.unavailability_reason = random.choice(indian_reasons)
+            response = f"Sorry yaar, I'm caught up with a {st.session_state.unavailability_reason}. Can we chat later? 😊"
+        else:
+            chat_history_text, user_name = get_history(st.session_state.user_id)
+            if random.random() < 0.05 and chat_history_text != "No prior chat history.":
+                chat_history_text = re.sub(r'(your \w+)', 'your [forgotten detail]', chat_history_text, count=1)
 
-        # Prepare full prompt with realism instructions
-        prompt = f"""
+            encoding = tiktoken.get_encoding("cl100k_base")
+            chat_history_text = encoding.decode(encoding.encode(chat_history_text)[:500])
+            user_input_truncated = encoding.decode(encoding.encode(user_input)[:100])
+
+            frustration_keywords = ["wtf", "why", "again", "forgot", "cring", "robot"]
+            if any(word in user_input_truncated.lower() for word in frustration_keywords):
+                st.session_state.current_mood = [m for m in MOODS if "Supportive" in m][0]
+            elif random.random() < 0.2:
+                st.session_state.current_mood = random.choice(MOODS)
+
+            prompt = f"""
 {personality_prompt}
 
-Recent history: {chat_history_text}
-Current date: {CURRENT_DATE} and time: {CURRENT_TIME} (adapt plans realistically, e.g., don't suggest past times).
-User's name (if known): {user_name} - always use it correctly after learning.
-Conversation state: {st.session_state.conversation_state} (use to avoid repeating questions; pivot if confirmed).
-If [forgotten detail] in history, ask for clarification naturally.
-If user seems frustrated (e.g., words like 'wtf'), respond empathetically, apologize if needed, and de-escalate.
-Evolve preferences based on history (e.g., grow to like user's hobbies).
+### Conversation Context
+- **Recent History:** {chat_history_text}
+- **User's Name (if known):** {user_name}
+- **Conversation State:** {st.session_state.conversation_state}
 
-Respond to: You: {user_input}
-Her:
+### Your Task
+Respond to the user's latest message: "{user_input_truncated}"
 """
+            
+            for attempt in range(2):
+                try:
+                    response = model.generate_content(prompt).text.strip()
+                    break
+                except Exception as e:
+                    if attempt == 1: response = "Oops, my brain's foggy—can you repeat? 😅"
+                    time.sleep(1)
 
-        # Generate with retry (fixed indentation)
-        for attempt in range(2):  # Up to 2 tries
-            try:
-                response = model.generate_content(prompt).text.strip()
-                break
-            except Exception as e:
-                if attempt == 1:
-                    response = "Oops, my brain's foggy—can you repeat? 😅"
-                time.sleep(1)  # Backoff
-
-    # Simulate delay for realism
     delay = random.uniform(0.5, 2.0)
-    if "Weary" in st.session_state.current_mood:
-        delay += 1
+    if "Weary" in st.session_state.current_mood: delay += 1
     time.sleep(delay)
 
+    st.session_state.chat_history.append({"role": "ai", "content": response})
     with st.chat_message("ai"):
         st.markdown(response)
 
-    # Save locally and to Supabase
-    st.session_state.chat_history.append({"user": user_input, "ai": response})
     save_chat(st.session_state.user_id, user_input, response)
 
-    # Update conversation state (e.g., detect confirmations)
-    if "toit" in user_input.lower() and "confirmed_place" not in st.session_state.conversation_state:
-        st.session_state.conversation_state['confirmed_place'] = "Toit"
+    if "toit" in user_input.lower(): st.session_state.conversation_state['confirmed_place'] = "Toit"
     time_match = re.search(r'\d+ baje', user_input)
-    if time_match and "confirmed_time" not in st.session_state.conversation_state:
-        st.session_state.conversation_state['confirmed_time'] = time_match.group(0)
+    if time_match: st.session_state.conversation_state['confirmed_time'] = time_match.group(0)
