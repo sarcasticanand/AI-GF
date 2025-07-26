@@ -12,7 +12,6 @@ from datetime import datetime
 # ---------------------------
 # 1. Load Environment / Secrets
 # ---------------------------
-# Streamlit Secrets for API Keys (dotenv not needed in Streamlit Cloud)
 api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
@@ -27,14 +26,14 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 # Configure Gemini
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel("models/gemini-1.5-pro-latest")  # Cache model for efficiency
+model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
 
 # Configure Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Current date and time for contextual moods (e.g., festivals, realistic plans)
-CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")  # Outputs dynamic date like '2025-07-26'
-CURRENT_TIME = datetime.now().strftime("%H:%M")  # e.g., '18:49' for 6:49 PM
+CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")
+CURRENT_TIME = datetime.now().strftime("%H:%M")
 current_hour = datetime.now().hour
 
 # ---------------------------
@@ -49,7 +48,7 @@ MOODS = [
 ]
 
 # ---------------------------
-# 3. Streamlit UI and Session Setup (Moved Earlier for Consistency)
+# 3. Streamlit UI and Session Setup
 # ---------------------------
 st.set_page_config(page_title="AI GF", page_icon="💬")
 st.title("Your AI GF")
@@ -71,8 +70,9 @@ with open("prompt.txt", "r") as f:
     base_prompt = f.read()
 
 personality_prompt = base_prompt.format(
-    current_mood=st.session_state.current_mood,  # Safe access
-    current_date=CURRENT_DATE
+    current_mood=st.session_state.current_mood,
+    current_date=CURRENT_DATE,
+    current_time=CURRENT_TIME  # New: Added for time awareness
 )
 
 # Display previous chats (local UI)
@@ -119,8 +119,8 @@ def save_chat(user_id, user_message, ai_response):
             'ai_response': ai_response,
             'timestamp': datetime.now().isoformat()
         }
-        # Simple name extraction (e.g., from "my name is X")
-        name_match = re.search(r'my name is (\w+ \w+)', user_message, re.IGNORECASE)
+        # Broader name extraction (matches "my name is X" or "I'm X")
+        name_match = re.search(r'(?:my name is|i\'m) (\w+( \w+)?)', user_message, re.IGNORECASE)
         if name_match:
             insert_data['user_name'] = name_match.group(1)
         supabase.table('chats').insert(insert_data).execute()
@@ -131,7 +131,7 @@ def save_chat(user_id, user_message, ai_response):
 # 5. Handle Proactive Check-ins (If No Recent Input)
 # ---------------------------
 if not user_input and ((time.time() - st.session_state.last_input_time > 3600) or len(st.session_state.chat_history) == 0):  # >1 hour or new session
-    proactive_prompt = f"{personality_prompt}\nGenerate a short proactive check-in message based on mood and date {CURRENT_DATE}."
+    proactive_prompt = f"{personality_prompt}\nGenerate a short proactive check-in message based on mood, date {CURRENT_DATE}, and time {CURRENT_TIME}."
     try:
         response = model.generate_content(proactive_prompt).text.strip()
     except Exception:
@@ -180,23 +180,22 @@ if user_input:
             st.session_state.current_mood = random.choice(MOODS)
 
         # Prepare full prompt with realism instructions
-       # Mood shift (20% chance)
-if random.random() < 0.2:
-    st.session_state.current_mood = random.choice(MOODS)
-prompt = f"""
+        prompt = f"""
 {personality_prompt}
 
 Recent history: {chat_history_text}
 Current date: {CURRENT_DATE} and time: {CURRENT_TIME} (adapt plans realistically, e.g., don't suggest past times).
 User's name (if known): {user_name} - always use it correctly after learning.
+Conversation state: {st.session_state.conversation_state} (use to avoid repeating questions; pivot if confirmed).
 If [forgotten detail] in history, ask for clarification naturally.
+If user seems frustrated (e.g., words like 'wtf'), respond empathetically, apologize if needed, and de-escalate.
 Evolve preferences based on history (e.g., grow to like user's hobbies).
 
 Respond to: You: {user_input}
 Her:
 """
 
-        # Generate with retry
+        # Generate with retry (fixed indentation)
         for attempt in range(2):  # Up to 2 tries
             try:
                 response = model.generate_content(prompt).text.strip()
