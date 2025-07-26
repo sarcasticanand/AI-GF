@@ -33,7 +33,7 @@ model = genai.GenerativeModel("models/gemini-1.5-pro-latest")  # Cache model for
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Current date for contextual moods (e.g., festivals)
-CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")  # Use actual date: Saturday, July 26, 2025
+CURRENT_DATE = datetime.now().strftime("%Y-%m-%d")  # Outputs dynamic date like '2025-07-26'
 
 # ---------------------------
 # 2. Mood Definitions (Optimized for Gemini Parsing)
@@ -46,12 +46,43 @@ MOODS = [
     "Festive: Description - Draws from India's vibrant festivals (e.g., Diwali, Holi) or small joys like weekend markets, fostering shared excitement without excess. Style - Energetic but grounded, 15-35 words, suggests activities, Hindi like 'mazaa aayega', respectful flirty. Example: With Ganesh Chaturthi coming, I'm craving modaks! Planning anything fun? We could share virtual festival stories—sounds romantic, no? 😉"
 ]
 
-# Load base prompt from file
+# ---------------------------
+# 3. Streamlit UI and Session Setup (Moved Earlier for Consistency)
+# ---------------------------
+st.set_page_config(page_title="AI GF", page_icon="💬")
+st.title("Your AI GF")
+
+# Session state setup
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())  # Unique per session
+if "current_mood" not in st.session_state:
+    st.session_state.current_mood = random.choice(MOODS)
+if "last_input_time" not in st.session_state:
+    st.session_state.last_input_time = time.time()
+
+# Load and format personality prompt (after session state to avoid errors)
 with open("prompt.txt", "r") as f:
     base_prompt = f.read()
 
+personality_prompt = base_prompt.format(
+    current_mood=st.session_state.current_mood,  # Safe access
+    current_date=CURRENT_DATE
+)
+
+# Display previous chats (local UI)
+for chat in st.session_state.chat_history:
+    with st.chat_message("user"):
+        st.markdown(chat["user"])
+    with st.chat_message("ai"):
+        st.markdown(chat["ai"])
+
+# Input box
+user_input = st.chat_input("Say something to your companion...")
+
 # ---------------------------
-# 3. Supabase Functions for Memory
+# 4. Supabase Functions for Memory
 # ---------------------------
 def get_history(user_id):
     """Fetch last 10 messages from Supabase for context."""
@@ -82,36 +113,10 @@ def save_chat(user_id, user_message, ai_response):
         st.warning(f"Error saving chat: {str(e)}")
 
 # ---------------------------
-# 4. Streamlit UI Setup
-# ---------------------------
-st.set_page_config(page_title="AI GF", page_icon="💬")
-st.title("Your AI GF")
-
-# Session state setup
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())  # Unique per session
-if "current_mood" not in st.session_state:
-    st.session_state.current_mood = random.choice(MOODS)
-if "last_input_time" not in st.session_state:
-    st.session_state.last_input_time = time.time()
-
-# Display previous chats (local UI)
-for chat in st.session_state.chat_history:
-    with st.chat_message("user"):
-        st.markdown(chat["user"])
-    with st.chat_message("ai"):
-        st.markdown(chat["ai"])
-
-# Input box
-user_input = st.chat_input("Say something to your companion...")
-
-# ---------------------------
 # 5. Handle Proactive Check-ins (If No Recent Input)
 # ---------------------------
-if not user_input and (time.time() - st.session_state.last_input_time > 3600):  # >1 hour since last input
-    proactive_prompt = f"{base_prompt.format(current_mood=st.session_state.current_mood)}\nGenerate a short proactive check-in message based on mood and date {CURRENT_DATE}."
+if not user_input and ((time.time() - st.session_state.last_input_time > 3600) or len(st.session_state.chat_history) == 0):  # >1 hour or new session
+    proactive_prompt = f"{personality_prompt}\nGenerate a short proactive check-in message based on mood and date {CURRENT_DATE}."
     try:
         response = model.generate_content(proactive_prompt).text.strip()
     except Exception:
@@ -155,7 +160,7 @@ if user_input:
 
         # Prepare full prompt with realism instructions
         prompt = f"""
-{base_prompt.format(current_mood=st.session_state.current_mood)}
+{personality_prompt}
 
 Recent history: {chat_history_text}
 Current date: {CURRENT_DATE} (reference for festivals or context).
