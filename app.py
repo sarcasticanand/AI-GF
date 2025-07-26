@@ -12,6 +12,7 @@ from datetime import datetime
 # ---------------------------
 # 1. Load Environment / Secrets
 # ---------------------------
+# Streamlit Secrets for API Keys (dotenv not needed in Streamlit Cloud)
 api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
@@ -72,7 +73,7 @@ with open("prompt.txt", "r") as f:
 personality_prompt = base_prompt.format(
     current_mood=st.session_state.current_mood,
     current_date=CURRENT_DATE,
-    current_time=CURRENT_TIME  # New: Added for time awareness
+    current_time=CURRENT_TIME
 )
 
 # Display previous chats (local UI)
