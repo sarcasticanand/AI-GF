@@ -180,15 +180,16 @@ if user_input:
             st.session_state.current_mood = random.choice(MOODS)
 
         # Prepare full prompt with realism instructions
-        prompt = f"""
+       # Mood shift (20% chance)
+if random.random() < 0.2:
+    st.session_state.current_mood = random.choice(MOODS)
+prompt = f"""
 {personality_prompt}
 
 Recent history: {chat_history_text}
 Current date: {CURRENT_DATE} and time: {CURRENT_TIME} (adapt plans realistically, e.g., don't suggest past times).
 User's name (if known): {user_name} - always use it correctly after learning.
-Conversation state: {st.session_state.conversation_state} (use to avoid repeating questions; pivot if confirmed).
 If [forgotten detail] in history, ask for clarification naturally.
-If user seems frustrated (e.g., words like 'wtf'), respond empathetically, apologize if needed, and de-escalate.
 Evolve preferences based on history (e.g., grow to like user's hobbies).
 
 Respond to: You: {user_input}
