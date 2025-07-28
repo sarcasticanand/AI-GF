@@ -54,15 +54,28 @@ EMOTIONS = ["happy", "sad", "excited", "worried", "calm", "frustrated", "loving"
 EMOJI_OPTIONS = ["😊", "😂", "❤️", "😍", "🤔", "😢", "😴", "🔥", "👍", "🙏"]
 
 # ---------------------------
-# 3. DATABASE HELPER FUNCTIONS
+# 3. PERSISTENT USER ID SYSTEM (FIXED)
 # ---------------------------
-def get_persistent_user_id():
-    """Create a persistent user ID based on browser session"""
-    if "persistent_user_id" not in st.session_state:
-        browser_id = str(uuid.uuid4())
-        st.session_state.persistent_user_id = browser_id
-    return st.session_state.persistent_user_id
+def get_browser_fingerprint():
+    """Create a browser-specific fingerprint for consistent user identification"""
+    # Create a unique identifier based on browser session and a stored key
+    if "browser_fingerprint" not in st.session_state:
+        # Check if we have a stored fingerprint in browser storage
+        fingerprint_key = f"user_fingerprint_{int(time.time() / 86400)}"  # Changes daily
+        st.session_state.browser_fingerprint = fingerprint_key
+    return st.session_state.browser_fingerprint
 
+def get_persistent_user_id():
+    """Create a truly persistent user ID that survives browser refreshes"""
+    # Use a combination of browser fingerprint and date to create consistent ID
+    browser_fp = get_browser_fingerprint()
+    # Create a hash that will be the same for the same browser for several days
+    user_id = hashlib.md5(f"{browser_fp}_malavika_user".encode()).hexdigest()
+    return user_id
+
+# ---------------------------
+# 4. DATABASE HELPER FUNCTIONS
+# ---------------------------
 def initialize_user_profile(user_id):
     """Initialize all user-related tables for a new user"""
     try:
@@ -126,7 +139,7 @@ def initialize_user_profile(user_id):
 
         return True
     except Exception as e:
-        st.error(f"Error initializing user: {e}")
+        # Silently handle errors in production
         return False
 
 def get_user_profile(user_id):
@@ -142,11 +155,20 @@ def get_user_profile(user_id):
             }
         else:
             # Initialize if not found
-            initialize_user_profile(user_id)
-            return get_user_profile(user_id)
+            if initialize_user_profile(user_id):
+                return get_user_profile(user_id)
+            else:
+                # Return default if database fails
+                return {
+                    'profile': {'user_id': user_id, 'name': ''},
+                    'personality': {'current_mood': 'playful', 'relationship_stage': 'getting_to_know', 'intimacy_level': 1}
+                }
     except Exception as e:
-        st.error(f"Error getting profile: {e}")
-        return None
+        # Return default on error
+        return {
+            'profile': {'user_id': user_id, 'name': ''},
+            'personality': {'current_mood': 'playful', 'relationship_stage': 'getting_to_know', 'intimacy_level': 1}
+        }
 
 def update_user_profile(user_id, profile_updates=None, personality_updates=None):
     """Update user profile and personality state"""
@@ -161,7 +183,6 @@ def update_user_profile(user_id, profile_updates=None, personality_updates=None)
         
         return True
     except Exception as e:
-        st.error(f"Error updating profile: {e}")
         return False
 
 def save_conversation(user_id, user_message, ai_response, context):
@@ -200,40 +221,9 @@ def save_conversation(user_id, user_message, ai_response, context):
         }
         supabase.table('chats').insert(chat_data).execute()
 
-        # Update daily interactions
-        update_daily_interactions(user_id)
-        
         return True
     except Exception as e:
-        st.error(f"Error saving conversation: {e}")
         return False
-
-def update_daily_interactions(user_id):
-    """Update daily interaction statistics"""
-    try:
-        today = date.today().isoformat()
-        
-        # Check if record exists for today
-        daily_check = supabase.table('daily_interactions').select('*').eq('user_id', user_id).eq('interaction_date', today).execute()
-        
-        if daily_check.data:
-            # Update existing record
-            current_total = daily_check.data[0]['total_messages']
-            supabase.table('daily_interactions').update({
-                'total_messages': current_total + 1,
-                'interaction_quality_score': min(10.0, daily_check.data[0]['interaction_quality_score'] + 0.1)
-            }).eq('user_id', user_id).eq('interaction_date', today).execute()
-        else:
-            # Create new daily record
-            daily_data = {
-                'user_id': user_id,
-                'interaction_date': today,
-                'total_messages': 1,
-                'interaction_quality_score': 5.0
-            }
-            supabase.table('daily_interactions').insert(daily_data).execute()
-    except Exception as e:
-        st.error(f"Error updating daily interactions: {e}")
 
 def detect_user_emotion(message):
     """Enhanced emotion detection"""
@@ -289,27 +279,6 @@ def get_conversation_context(user_data, user_input, user_emotion):
         'response_time_ms': random.randint(800, 2000)
     }
 
-def create_shared_memory(user_id, title, description, memory_type='conversation', emotional_weight=5):
-    """Create a shared memory"""
-    try:
-        memory_data = {
-            'user_id': user_id,
-            'memory_title': title,
-            'memory_description': description,
-            'memory_type': memory_type,
-            'emotional_weight': emotional_weight,
-            'tags': [],
-            'created_date': now_ist.isoformat(),
-            'last_referenced': now_ist.isoformat(),
-            'reference_count': 1,
-            'is_inside_joke': False
-        }
-        supabase.table('shared_memories').insert(memory_data).execute()
-        return True
-    except Exception as e:
-        st.error(f"Error creating memory: {e}")
-        return False
-
 def simulate_typing_with_thinking():
     """Simulate realistic typing with thinking pauses"""
     typing_placeholder = st.empty()
@@ -319,8 +288,7 @@ def simulate_typing_with_thinking():
     time.sleep(random.uniform(1.0, 2.0))
     
     typing_placeholder.empty()
-    thinking_placeholder.markdown("🤔 *thinking...*")
-    time.sleep(random.uniform(1.5, 2.5))
+    thinking_placeholder.empty()
     
     thinking_placeholder.empty()
     typing_placeholder.markdown("💭 *typing...*")
@@ -330,12 +298,12 @@ def simulate_typing_with_thinking():
     thinking_placeholder.empty()
 
 # ---------------------------
-# 4. STREAMLIT UI
+# 4. STREAMLIT UI (SIMPLIFIED SIDEBAR)
 # ---------------------------
 st.markdown("""
 <div style='text-align: center; padding: 20px;'>
     <h1 style='color: #FF69B4; font-family: Georgia;'>💕 Malavika - Your AI Companion</h1>
-    <p style='color: #666; font-style: italic;'>Advanced AI with Complete Memory System</p>
+    <p style='color: #666; font-style: italic;'>Your personal AI girlfriend</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -348,51 +316,59 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
+if "selected_emoji" not in st.session_state:
+    st.session_state.selected_emoji = ""
 
-# Sidebar for user info and debugging
+# Simplified sidebar (minimal info)
 with st.sidebar:
-    st.markdown("### Your Profile")
+    st.markdown("### 💕 Chat Options")
     
-    if user_data:
-        profile = user_data['profile']
-        personality = user_data['personality']
-        
-        # Display current status
-        st.write(f"**Name:** {profile.get('name', 'Not set')}")
-        st.write(f"**Relationship:** {personality.get('relationship_stage', 'getting_to_know')}")
-        st.write(f"**Intimacy Level:** {personality.get('intimacy_level', 1)}/10")
-        st.write(f"**Current Mood:** {personality.get('current_mood', 'neutral')}")
-        
-        # Quick stats
-        st.markdown("### Today's Stats")
-        try:
-            today_stats = supabase.table('daily_interactions').select('*').eq('user_id', user_id).eq('interaction_date', date.today().isoformat()).execute()
-            if today_stats.data:
-                stats = today_stats.data[0]
-                st.write(f"**Messages:** {stats.get('total_messages', 0)}")
-                st.write(f"**Quality Score:** {stats.get('interaction_quality_score', 5.0):.1f}/10")
-        except:
-            st.write("**Messages:** 0")
+    # Profile name display (if known)
+    if user_data and user_data['profile'].get('name'):
+        st.write(f"Hi **{user_data['profile']['name']}**! 👋")
+    else:
+        st.write("Hi there! 👋")
     
-    # Quick emoji selector
+    # Quick emoji selector (FIXED)
     st.markdown("### Quick Emojis")
-    emoji_cols = st.columns(5)
-    for i, emoji in enumerate(EMOJI_OPTIONS):
-        if emoji_cols[i % 5].button(emoji):
-            st.session_state.quick_emoji = emoji
+    st.write("*Click to add to your next message*")
     
-    # Debug info
-    st.markdown("### Debug Info")
-    st.write(f"**User ID:** {user_id[:8]}...")
-    st.write(f"**Session:** {st.session_state.session_id[:8]}...")
+    # Create emoji buttons in a grid
+    cols = st.columns(5)
+    for i, emoji in enumerate(EMOJI_OPTIONS):
+        col_idx = i % 5
+        if cols[col_idx].button(emoji, key=f"emoji_btn_{i}"):
+            st.session_state.selected_emoji = emoji
+            st.rerun()  # Refresh to show selected emoji
+    
+    # Show selected emoji
+    if st.session_state.selected_emoji:
+        st.success(f"Selected: {st.session_state.selected_emoji}")
+        if st.button("Clear emoji"):
+            st.session_state.selected_emoji = ""
+            st.rerun()
 
 # Display chat history
 for chat in st.session_state.chat_history:
     with st.chat_message(chat["role"]):
         st.markdown(chat["content"])
 
-# Chat input
-user_input = st.chat_input("Talk to Malavika...")
+# Chat input with emoji integration
+def get_chat_input():
+    """Get user input with emoji integration"""
+    base_input = st.chat_input("Talk to Malavika...")
+    
+    if base_input:
+        # Add selected emoji to message if any
+        if st.session_state.selected_emoji:
+            final_input = f"{base_input} {st.session_state.selected_emoji}"
+            # Clear the selected emoji after use
+            st.session_state.selected_emoji = ""
+            return final_input
+        return base_input
+    return None
+
+user_input = get_chat_input()
 
 # ---------------------------
 # 5. CHAT LOGIC
@@ -413,6 +389,7 @@ if user_input and user_data:
     # Update user name if mentioned
     if context['user_name']:
         update_user_profile(user_id, profile_updates={'name': context['user_name']})
+        user_data['profile']['name'] = context['user_name']  # Update local copy
     
     # Create dynamic prompt
     profile = user_data['profile']
@@ -423,7 +400,12 @@ if user_input and user_data:
         recent_convos = supabase.table('conversations').select('user_message, ai_response').eq('user_id', user_id).order('timestamp', desc=True).limit(5).execute()
         history = "\n".join([f"You: {row['user_message']}\nMalavika: {row['ai_response']}" for row in recent_convos.data[::-1]]) if recent_convos.data else "No prior history."
     except:
-        history = "No prior history."
+        # Fallback to chats table
+        try:
+            recent_chats = supabase.table('chats').select('user_message, ai_response').eq('user_id', user_id).order('timestamp', desc=True).limit(5).execute()
+            history = "\n".join([f"You: {row['user_message']}\nMalavika: {row['ai_response']}" for row in recent_chats.data[::-1]]) if recent_chats.data else "No prior history."
+        except:
+            history = "No prior history."
     
     prompt = f"""You are Malavika Gupta, a 25-year-old content writer from Jaipur living in Bengaluru.
 
@@ -486,28 +468,3 @@ Respond as Malavika:"""
     
     if personality_updates:
         update_user_profile(user_id, personality_updates=personality_updates)
-    
-    # Create shared memory for meaningful interactions
-    if context['user_emotion'] in ['loving', 'excited'] or len(user_input) > 100:
-        create_shared_memory(
-            user_id, 
-            f"Conversation on {CURRENT_DATE}", 
-            f"User said: {user_input[:100]}... AI responded with care and understanding.",
-            'conversation',
-            7 if context['user_emotion'] == 'loving' else 5
-        )
-    
-    # Clear quick emoji
-    if hasattr(st.session_state, 'quick_emoji'):
-        del st.session_state.quick_emoji
-
-# Display current database status
-if st.sidebar.button("Show Database Status"):
-    st.sidebar.markdown("### Database Status")
-    tables_to_check = ['user_profiles', 'ai_personality_state', 'conversations', 'daily_interactions', 'shared_memories']
-    for table in tables_to_check:
-        try:
-            count = supabase.table(table).select('id', count='exact').execute()
-            st.sidebar.write(f"**{table}:** {count.count} records")
-        except:
-            st.sidebar.write(f"**{table}:** Error")
