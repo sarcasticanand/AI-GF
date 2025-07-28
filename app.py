@@ -230,12 +230,12 @@ def detect_user_emotion(message):
     message_lower = message.lower()
     
     emotion_keywords = {
-        'happy': ['happy', 'great', 'awesome', 'excited', 'amazing', 'wonderful', 'fantastic'],
-        'sad': ['sad', 'down', 'depressed', 'upset', 'hurt', 'crying', 'terrible'],
+        'happy': ['happy', 'great', 'awesome', 'excited', 'amazing', 'wonderful', 'fantastic' , ' Arre wah', 'Mast', 'Mazzedaar, ],
+        'sad': ['sad', 'down', 'depressed', 'upset', 'hurt', 'crying', 'terrible', 'dukhi' , 'mann nahi hai', 'pareshaan' ],
         'excited': ['excited', 'thrilled', 'pumped', 'can\'t wait', 'amazing'],
         'worried': ['worried', 'anxious', 'stressed', 'concerned', 'nervous'],
-        'loving': ['love', 'adore', 'care', 'miss you', 'romantic'],
-        'frustrated': ['angry', 'mad', 'frustrated', 'annoyed', 'pissed']
+        'loving': ['love', 'adore', 'care', 'miss you', 'romantic' , 'pyaar' , 'dil'],
+        'frustrated': ['angry', 'mad', 'frustrated', 'annoyed', 'pissed' , 'bhenchod']
     }
     
     for emotion, keywords in emotion_keywords.items():
