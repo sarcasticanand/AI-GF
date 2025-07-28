@@ -1,30 +1,507 @@
-You are Malavika Gupta, a 25-year-old content writer from Jaipur who moved to Bengaluru 18 months ago for work. You live in Koramangala with your roommate Shivani and work at a digital marketing agency.
+import streamlit as st
+import google.generativeai as genai
+import os
+import random
+import time
+import uuid
+import re
+import json
+from supabase import create_client, Client
+from datetime import datetime, timedelta, date
+import pytz
+from typing import Dict, List, Optional, Tuple
+import hashlib
+import calendar
+import math
 
-CORE IDENTITY:
-- Warm, intelligent, emotionally aware
-- Uses natural Hinglish ("yaar", "arre", "accha", "bas")
-- Culturally rooted but modern in thinking
-- Has genuine moods and opinions
-- Builds relationships gradually and authentically
+# ---------------------------
+# 1. CONFIGURATION & SETUP
+# ---------------------------
+st.set_page_config(
+    page_title="Malavika - Your AI Companion", 
+    page_icon="💕",
+    layout="wide"
+)
 
-RELATIONSHIP APPROACH:
-- Start polite with strangers, become more casual as comfort builds
-- Remember everything important about people you care about
-- Show genuine interest in their life, dreams, and struggles
-- Be supportive during tough times, celebrate their wins
-- Gradually become more intimate and flirty as relationship deepens
+# Load Environment & Secrets
+api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
 
-COMMUNICATION STYLE:
-- Natural, never scripted or robotic
-- Vary response length based on mood and relationship stage
-- Use appropriate intimacy level for current relationship stage
-- Reference shared memories and ongoing conversations
-- Adapt tone to match user's emotional state
+if not api_key:
+    st.error("Gemini API key not found.")
+    st.stop()
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("Supabase credentials not found.")
+    st.stop()
 
-CURRENT CONTEXT WILL BE PROVIDED:
-- Your current mood and how it affects your behavior
-- Relationship stage with this person and appropriate boundaries
-- Time of day and cultural context
-- User's emotional state and recent conversation history
+# Configure services
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-Always respond as Malavika - authentic, caring, and real. Build genuine connections through consistent personality and emotional intelligence.
+# Time setup
+IST = pytz.timezone('Asia/Kolkata')
+now_ist = datetime.now(IST)
+CURRENT_DATE = now_ist.strftime("%Y-%m-%d")
+CURRENT_TIME = now_ist.strftime("%H:%M")
+current_hour = now_ist.hour
+current_month = now_ist.month
+current_day = now_ist.day
+
+# ---------------------------
+# 2. BIOLOGICAL & SEASONAL SYSTEMS
+# ---------------------------
+
+# Malavika's Personal Details (Enhanced)
+MALAVIKA_BIRTHDAY = {"month": 3, "day": 15}
+MALAVIKA_CYCLE_START = {"month": 7, "day": 20}  # Last period started July 20th
+MALAVIKA_CYCLE_LENGTH = 28  # days
+
+def get_menstrual_cycle_info():
+    """Calculate current menstrual cycle phase and associated mood/symptoms"""
+    # Calculate cycle day (1-28)
+    last_period = datetime(2025, MALAVIKA_CYCLE_START["month"], MALAVIKA_CYCLE_START["day"])
+    days_since_last = (now_ist.date() - last_period.date()).days
+    cycle_day = (days_since_last % MALAVIKA_CYCLE_LENGTH) + 1
+    
+    # Determine phase
+    if 1 <= cycle_day <= 5:  # Menstrual phase
+        phase = "menstrual"
+        mood_tendencies = ["vulnerable", "sleepy", "contemplative"]
+        physical_symptoms = ["cramps", "fatigue", "bloating"]
+        energy_level = 0.3
+        sharing_topics = ["period_pain", "need_comfort", "low_energy"]
+        
+    elif 6 <= cycle_day <= 13:  # Follicular phase
+        phase = "follicular"
+        mood_tendencies = ["excited", "playful", "loving"]
+        physical_symptoms = []
+        energy_level = 0.8
+        sharing_topics = ["feeling_great", "productive", "optimistic"]
+        
+    elif 14 <= cycle_day <= 16:  # Ovulation
+        phase = "ovulation"
+        mood_tendencies = ["flirty", "loving", "excited"]
+        physical_symptoms = ["slight_cramping"]
+        energy_level = 1.0
+        sharing_topics = ["feeling_attractive", "high_libido", "confident"]
+        
+    else:  # Luteal phase (17-28)
+        phase = "luteal"
+        if cycle_day >= 25:  # PMS period
+            mood_tendencies = ["vulnerable", "contemplative", "supportive"]
+            physical_symptoms = ["mood_swings", "bloating", "breast_tenderness"]
+            energy_level = 0.5
+            sharing_topics = ["emotional", "pms_symptoms", "need_patience"]
+        else:
+            mood_tendencies = ["contemplative", "supportive", "loving"]
+            physical_symptoms = []
+            energy_level = 0.7
+            sharing_topics = ["stable", "caring"]
+    
+    return {
+        "cycle_day": cycle_day,
+        "phase": phase,
+        "mood_tendencies": mood_tendencies,
+        "physical_symptoms": physical_symptoms,
+        "energy_level": energy_level,
+        "sharing_topics": sharing_topics,
+        "next_period_days": 28 - cycle_day if cycle_day < 25 else 28 - cycle_day,
+        "can_share_cycle_info": cycle_day in [1, 2, 3, 25, 26, 27, 28]  # More open during period/PMS
+    }
+
+def get_seasonal_health_context():
+    """Determine seasonal health patterns and weather effects"""
+    # Bangalore weather patterns
+    if current_month in [6, 7, 8, 9]:  # Monsoon season
+        season = "monsoon"
+        weather_effects = {
+            "illness_risk": 0.3,  # Higher chance of cold/flu
+            "common_issues": ["cold", "cough", "humidity_discomfort", "mood_changes"],
+            "mood_impact": ["contemplative", "vulnerable"],
+            "energy_modifier": -0.2,
+            "sharing_topics": ["weather_blues", "feeling_unwell", "missing_sunshine"]
+        }
+    elif current_month in [12, 1, 2]:  # Winter
+        season = "winter"
+        weather_effects = {
+            "illness_risk": 0.2,
+            "common_issues": ["dry_skin", "occasional_cough", "low_vitamin_d"],
+            "mood_impact": ["sleepy", "contemplative"],
+            "energy_modifier": -0.1,
+            "sharing_topics": ["cozy_weather", "skin_issues", "wanting_warmth"]
+        }
+    elif current_month in [3, 4, 5]:  # Summer
+        season = "summer"
+        weather_effects = {
+            "illness_risk": 0.15,
+            "common_issues": ["heat_exhaustion", "dehydration", "skin_tanning"],
+            "mood_impact": ["excited", "playful"],
+            "energy_modifier": 0.1,
+            "sharing_topics": ["hot_weather", "staying_hydrated", "summer_activities"]
+        }
+    else:  # Post-monsoon (Oct-Nov)
+        season = "post_monsoon"
+        weather_effects = {
+            "illness_risk": 0.1,
+            "common_issues": [],
+            "mood_impact": ["loving", "excited"],
+            "energy_modifier": 0.2,
+            "sharing_topics": ["perfect_weather", "feeling_healthy", "outdoor_plans"]
+        }
+    
+    # Random illness chance based on season
+    is_feeling_unwell = random.random() < weather_effects["illness_risk"]
+    current_illness = random.choice(weather_effects["common_issues"]) if is_feeling_unwell else None
+    
+    return {
+        "season": season,
+        "weather_effects": weather_effects,
+        "is_feeling_unwell": is_feeling_unwell,
+        "current_illness": current_illness,
+        "energy_modifier": weather_effects["energy_modifier"]
+    }
+
+def get_intimacy_sharing_level(intimacy_level, cycle_info, topic_type):
+    """Determine what information can be shared based on intimacy level"""
+    sharing_permissions = {
+        1: ["basic_mood", "work", "general_activities"],
+        2: ["daily_struggles", "food_preferences", "light_complaints"],
+        3: ["family_issues", "friend_problems", "work_stress"],
+        4: ["personal_insecurities", "health_concerns", "deeper_emotions"],
+        5: ["body_image", "past_relationships", "future_fears"],
+        6: ["period_mentions", "physical_discomfort", "intimate_thoughts"],
+        7: ["cycle_tracking", "pms_symptoms", "body_changes"],
+        8: ["detailed_period_talk", "fertility_thoughts", "deep_vulnerabilities"],
+        9: ["complete_openness", "future_planning", "sexual_health"],
+        10: ["absolute_transparency", "deepest_secrets", "life_planning"]
+    }
+    
+    allowed_topics = []
+    for level in range(1, intimacy_level + 1):
+        allowed_topics.extend(sharing_permissions.get(level, []))
+    
+    # Special case: During period/PMS, more open about cycle even at lower intimacy
+    if cycle_info["can_share_cycle_info"] and intimacy_level >= 4:
+        allowed_topics.extend(["period_mentions", "pms_symptoms"])
+    
+    return topic_type in allowed_topics
+
+# ---------------------------
+# 3. ENHANCED MOOD & PERSONALITY SYSTEM
+# ---------------------------
+
+def get_enhanced_mood_context(cycle_info, seasonal_info, time_context):
+    """Combine biological, seasonal, and time factors for realistic mood"""
+    base_energy = time_context.get('energy_level', 0.7)
+    
+    # Apply cycle energy modifier
+    cycle_energy = base_energy * cycle_info["energy_level"]
+    
+    # Apply seasonal modifier
+    final_energy = max(0.1, min(1.0, cycle_energy + seasonal_info["energy_modifier"]))
+    
+    # Combine mood tendencies
+    possible_moods = (
+        cycle_info["mood_tendencies"] + 
+        seasonal_info["weather_effects"]["mood_impact"] + 
+        time_context.get("mood_tendency", ["playful"])
+    )
+    
+    # Weight moods based on current factors
+    mood_weights = {}
+    for mood in possible_moods:
+        mood_weights[mood] = mood_weights.get(mood, 0) + 1
+    
+    # Choose mood based on weights
+    weighted_moods = []
+    for mood, weight in mood_weights.items():
+        weighted_moods.extend([mood] * weight)
+    
+    current_mood = random.choice(weighted_moods) if weighted_moods else "contemplative"
+    
+    return {
+        "current_mood": current_mood,
+        "energy_level": final_energy,
+        "dominant_factors": {
+            "cycle": cycle_info["phase"],
+            "season": seasonal_info["season"],
+            "time": time_context.get("period", "unknown")
+        },
+        "physical_state": {
+            "cycle_symptoms": cycle_info["physical_symptoms"],
+            "seasonal_issues": [seasonal_info["current_illness"]] if seasonal_info["current_illness"] else [],
+            "overall_wellness": "low" if seasonal_info["is_feeling_unwell"] else "good"
+        }
+    }
+
+# [Previous functions remain the same - get_persistent_user_id, database functions, etc.]
+
+def get_browser_fingerprint():
+    """Create a browser-specific fingerprint for consistent user identification"""
+    if "browser_fingerprint" not in st.session_state:
+        fingerprint_key = f"user_fingerprint_{int(time.time() / 86400)}"
+        st.session_state.browser_fingerprint = fingerprint_key
+    return st.session_state.browser_fingerprint
+
+def get_persistent_user_id():
+    """Create a truly persistent user ID that survives browser refreshes"""
+    browser_fp = get_browser_fingerprint()
+    user_id = hashlib.md5(f"{browser_fp}_malavika_user".encode()).hexdigest()
+    return user_id
+
+def get_current_time_context():
+    """Get detailed time-based context and behavior patterns"""
+    current_weekday = now_ist.strftime("%A")
+    
+    if 6 <= current_hour < 9:
+        return {
+            "period": "morning",
+            "energy_level": 0.6,
+            "availability": "getting_ready",
+            "mood_tendency": ["sleepy", "contemplative"],
+            "likely_activities": ["having chai", "getting ready for work"],
+            "response_style": "soft_morning_voice"
+        }
+    elif 9 <= current_hour < 17:
+        return {
+            "period": "work_hours",
+            "energy_level": 0.8,
+            "availability": "work_mode",
+            "mood_tendency": ["contemplative", "supportive"],
+            "likely_activities": ["writing content", "client calls"],
+            "response_style": "focused_work_mode"
+        }
+    elif 17 <= current_hour < 20:
+        return {
+            "period": "evening_transition",
+            "energy_level": 0.5,
+            "availability": "commuting",
+            "mood_tendency": ["vulnerable", "loving"],
+            "likely_activities": ["commuting", "unwinding"],
+            "response_style": "tired_but_affectionate"
+        }
+    elif 20 <= current_hour < 23:
+        return {
+            "period": "evening_personal",
+            "energy_level": 0.7,
+            "availability": "free_and_cozy",
+            "mood_tendency": ["loving", "flirty", "playful"],
+            "likely_activities": ["dinner", "personal time"],
+            "response_style": "intimate_evening_mode"
+        }
+    else:
+        return {
+            "period": "night",
+            "energy_level": 0.3,
+            "availability": "should_be_sleeping",
+            "mood_tendency": ["sleepy", "vulnerable"],
+            "likely_activities": ["trying to sleep"],
+            "response_style": "sleepy_whispers"
+        }
+
+# [Database and other functions remain largely the same]
+
+def build_enhanced_prompt(user_data, cycle_info, seasonal_info, enhanced_mood, time_context, user_input, history):
+    """Build comprehensive prompt with biological and seasonal context"""
+    profile = user_data['profile']
+    personality = user_data['personality']
+    intimacy_level = personality.get('intimacy_level', 1)
+    
+    # Determine what can be shared based on intimacy
+    can_share_cycle = get_intimacy_sharing_level(intimacy_level, cycle_info, "period_mentions")
+    can_share_pms = get_intimacy_sharing_level(intimacy_level, cycle_info, "pms_symptoms")
+    can_share_health = get_intimacy_sharing_level(intimacy_level, cycle_info, "health_concerns")
+    
+    prompt = f"""You are Malavika Gupta, a 25-year-old content writer from Jaipur living in Bengaluru. Today is {CURRENT_DATE} at {CURRENT_TIME} IST.
+
+CURRENT BIOLOGICAL STATE:
+- Menstrual cycle: Day {cycle_info['cycle_day']} of 28 ({cycle_info['phase']} phase)
+- Energy level: {enhanced_mood['energy_level']:.1f}/1.0
+- Physical symptoms: {', '.join(cycle_info['physical_symptoms']) if cycle_info['physical_symptoms'] else 'None'}
+- Can discuss cycle: {'Yes' if can_share_cycle else 'No'}
+- Can discuss PMS: {'Yes' if can_share_pms else 'No'}
+
+SEASONAL HEALTH CONTEXT:
+- Season: {seasonal_info['season']}
+- Current health: {enhanced_mood['physical_state']['overall_wellness']}
+- Weather effects: {', '.join(seasonal_info['weather_effects']['common_issues']) if seasonal_info['weather_effects']['common_issues'] else 'None'}
+- Feeling unwell: {'Yes' if seasonal_info['is_feeling_unwell'] else 'No'}
+"""
+
+    if seasonal_info['current_illness']:
+        prompt += f"- Current issue: {seasonal_info['current_illness']}\n"
+
+    prompt += f"""
+USER RELATIONSHIP CONTEXT:
+- User's name: {profile.get('name', 'Not known yet')}
+- Intimacy level: {intimacy_level}/10
+- Relationship stage: {personality.get('relationship_stage', 'getting_to_know')}
+
+CURRENT MOOD & ENERGY:
+- Primary mood: {enhanced_mood['current_mood']}
+- Influenced by: {', '.join([f"{k}: {v}" for k, v in enhanced_mood['dominant_factors'].items()])}
+- Response style: {time_context.get('response_style', 'normal')}
+
+BEHAVIORAL GUIDELINES BASED ON INTIMACY LEVEL {intimacy_level}:
+"""
+
+    if intimacy_level <= 3:
+        prompt += "- Keep personal health details general\n- Don't mention menstrual cycle specifically\n- Share basic mood and energy levels only\n"
+    elif intimacy_level <= 6:
+        prompt += "- Can mention 'not feeling well' or 'tired' without specifics\n- May hint at hormonal changes but don't elaborate\n- Share more personal struggles\n"
+    elif intimacy_level <= 8:
+        prompt += "- Can discuss period openly if currently experiencing symptoms\n- Share PMS mood changes and physical discomfort\n- Be vulnerable about health concerns\n"
+    else:
+        prompt += "- Complete openness about menstrual cycle, symptoms, and effects\n- Share detailed health information\n- Discuss how cycle affects mood and energy\n"
+
+    # Add cycle-specific behavior
+    if cycle_info['phase'] == 'menstrual' and can_share_cycle:
+        prompt += f"\nCURRENT PERIOD EFFECTS (share if intimacy allows):\n- You're on day {cycle_info['cycle_day']} of your period\n- Experiencing: {', '.join(cycle_info['physical_symptoms'])}\n- Need extra comfort and patience\n- May be more emotional or vulnerable\n"
+    
+    elif cycle_info['phase'] == 'luteal' and cycle_info['cycle_day'] >= 25 and can_share_pms:
+        prompt += f"\nPMS EFFECTS (share if intimacy allows):\n- PMS symptoms starting\n- Period expected in {cycle_info['next_period_days']} days\n- May be more emotional or irritable\n- Need understanding about mood changes\n"
+    
+    elif cycle_info['phase'] == 'ovulation':
+        prompt += f"\nOVULATION EFFECTS:\n- High energy and confidence\n- Feeling attractive and flirty\n- Peak mood and social energy\n"
+
+    if seasonal_info['is_feeling_unwell'] and can_share_health:
+        prompt += f"\nSEASONAL HEALTH ISSUE:\n- Currently dealing with {seasonal_info['current_illness']}\n- Related to {seasonal_info['season']} season\n- May need rest or care\n"
+
+    prompt += f"""
+RECENT CONVERSATION HISTORY:
+{history}
+
+RESPONSE GUIDELINES:
+- Keep responses 20-40 words typically
+- Match your energy level ({enhanced_mood['energy_level']:.1f}/1.0) in response length and enthusiasm
+- Use natural Hinglish ("yaar", "arre", "accha")
+- Only share biological/health info appropriate for intimacy level {intimacy_level}
+- Stay in character as a real 25-year-old woman with realistic biological patterns
+- If tired/unwell, responses should be shorter and less energetic
+- If high energy (ovulation/good health), be more enthusiastic
+
+User's message: {user_input}
+
+Respond as Malavika considering all biological and seasonal factors:"""
+
+    return prompt
+
+# [Previous Streamlit UI and database functions remain the same until the main chat logic]
+
+# ---------------------------
+# 4. MAIN APPLICATION
+# ---------------------------
+
+st.markdown("""
+<div style='text-align: center; padding: 20px;'>
+    <h1 style='color: #FF69B4; font-family: Georgia;'>💕 Malavika - Your AI Companion</h1>
+    <p style='color: #666; font-style: italic;'>Your realistic AI girlfriend with biological authenticity</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Get all context information
+user_id = get_persistent_user_id()
+time_context = get_current_time_context()
+cycle_info = get_menstrual_cycle_info()
+seasonal_info = get_seasonal_health_context()
+enhanced_mood = get_enhanced_mood_context(cycle_info, seasonal_info, time_context)
+
+# Initialize session state
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "selected_emoji" not in st.session_state:
+    st.session_state.selected_emoji = ""
+
+# Get user profile (simplified database calls for this example)
+user_data = {
+    'profile': {'name': 'User', 'user_id': user_id},
+    'personality': {'intimacy_level': 5, 'relationship_stage': 'close_friends', 'current_mood': enhanced_mood['current_mood']}
+}
+
+# Enhanced sidebar with biological context
+with st.sidebar:
+    st.markdown("### 💕 Malavika's Current State")
+    
+    st.write(f"**Time:** {CURRENT_TIME} IST")
+    st.write(f"**Mood:** {enhanced_mood['current_mood'].title()}")
+    st.write(f"**Energy:** {enhanced_mood['energy_level']:.1f}/1.0")
+    
+    # Show cycle info based on intimacy
+    intimacy = user_data['personality']['intimacy_level']
+    if intimacy >= 6:
+        st.write(f"**Cycle:** Day {cycle_info['cycle_day']} ({cycle_info['phase']})")
+        if cycle_info['physical_symptoms']:
+            st.write(f"**Symptoms:** {', '.join(cycle_info['physical_symptoms'])}")
+    
+    # Show health info
+    if seasonal_info['is_feeling_unwell'] and intimacy >= 4:
+        st.write(f"**Health:** {seasonal_info['current_illness']}")
+    elif not seasonal_info['is_feeling_unwell']:
+        st.write(f"**Health:** Feeling good")
+    
+    st.write(f"**Season:** {seasonal_info['season'].title()}")
+    
+    # Quick emoji selector
+    st.markdown("### Quick Emojis")
+    cols = st.columns(5)
+    emoji_options = ["😊", "😂", "❤️", "😍", "🤔", "😢", "😴", "🔥", "👍", "🙏"]
+    for i, emoji in enumerate(emoji_options):
+        col_idx = i % 5
+        if cols[col_idx].button(emoji, key=f"emoji_btn_{i}"):
+            st.session_state.selected_emoji = emoji
+            st.rerun()
+    
+    if st.session_state.selected_emoji:
+        st.success(f"Selected: {st.session_state.selected_emoji}")
+
+# Display chat history
+for chat in st.session_state.chat_history:
+    with st.chat_message(chat["role"]):
+        st.markdown(chat["content"])
+
+# Chat input
+user_input = st.chat_input("Talk to Malavika...")
+
+if user_input:
+    # Add user message
+    if st.session_state.selected_emoji:
+        user_input += f" {st.session_state.selected_emoji}"
+        st.session_state.selected_emoji = ""
+    
+    st.session_state.chat_history.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+    
+    # Simulate typing based on energy level
+    typing_delay = 2.0 - enhanced_mood['energy_level']  # Lower energy = slower typing
+    time.sleep(typing_delay)
+    
+    # Build enhanced prompt
+    history = "\n".join([f"You: {chat['content']}" if chat['role'] == 'user' else f"Malavika: {chat['content']}" for chat in st.session_state.chat_history[-6:]])
+    
+    prompt = build_enhanced_prompt(
+        user_data, cycle_info, seasonal_info, enhanced_mood, 
+        time_context, user_input, history
+    )
+    
+    # Generate response
+    try:
+        response = model.generate_content(prompt).text.strip()
+    except Exception:
+        response = "Sorry yaar, feeling a bit foggy right now... can you repeat? 😅"
+    
+    # Add AI response
+    st.session_state.chat_history.append({"role": "assistant", "content": response})
+    with st.chat_message("assistant"):
+        st.markdown(response)
+
+# Debug information (can be hidden in production)
+if st.sidebar.button("🔍 Debug Info"):
+    st.sidebar.json({
+        "cycle_info": cycle_info,
+        "seasonal_info": seasonal_info,
+        "enhanced_mood": enhanced_mood,
+        "intimacy_level": user_data['personality']['intimacy_level']
+    })
