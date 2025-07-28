@@ -729,23 +729,23 @@ def should_use_emoji(mood, intimacy_level, cycle_phase):
         return random.random() < 0.2
 
 def simulate_typing_with_thinking():
-    """Simulate realistic typing with thinking pauses"""
+    """Simulate realistic typing with pause (no thinking indicator)"""
     typing_placeholder = st.empty()
-    thinking_placeholder = st.empty()
     
+    # First typing phase
     typing_placeholder.markdown("💭 *typing...*")
     time.sleep(random.uniform(1.0, 2.0))
     
+    # Clear and pause (silent thinking time)
     typing_placeholder.empty()
-    thinking_placeholder.markdown("🤔 *thinking...*")
-    time.sleep(random.uniform(1.5, 2.5))
+    time.sleep(random.uniform(1.5, 2.5))  # Silent pause instead of showing "thinking"
     
-    thinking_placeholder.empty()
+    # Second typing phase
     typing_placeholder.markdown("💭 *typing...*")
     time.sleep(random.uniform(0.8, 1.5))
     
+    # Clear all indicators
     typing_placeholder.empty()
-    thinking_placeholder.empty()
 
 # ---------------------------
 # 8. ENHANCED PROMPT BUILDER
