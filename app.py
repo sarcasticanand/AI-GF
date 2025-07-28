@@ -7,7 +7,7 @@ import uuid
 import re
 import json
 from supabase import create_client, Client
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pytz
 from typing import Dict, List, Optional, Tuple
 import hashlib
@@ -46,293 +46,333 @@ CURRENT_TIME = now_ist.strftime("%H:%M")
 current_hour = now_ist.hour
 
 # ---------------------------
-# 2. PERSISTENT USER ID SYSTEM
+# 2. CONSTANTS & CONFIGURATION
 # ---------------------------
-def get_persistent_user_id():
-    """Create a persistent user ID based on browser session"""
-    # Use Streamlit's session state to create a consistent ID
-    if "persistent_user_id" not in st.session_state:
-        # Create a unique ID based on timestamp + random for this browser session
-        # This will persist across page refreshes but reset on new browser sessions
-        browser_id = hashlib.md5(f"{time.time()}_{random.random()}".encode()).hexdigest()
-        st.session_state.persistent_user_id = browser_id
-    return st.session_state.persistent_user_id
-
-# ---------------------------
-# 3. MOOD & RELATIONSHIP SYSTEM
-# ---------------------------
-MOODS = {
-    "loving": {"traits": ["affectionate", "caring", "warm"], "emoji": "🥰"},
-    "playful": {"traits": ["teasing", "funny", "energetic"], "emoji": "😄"},
-    "contemplative": {"traits": ["deep", "philosophical", "thoughtful"], "emoji": "🤔"},
-    "supportive": {"traits": ["encouraging", "understanding", "patient"], "emoji": "🤗"},
-    "sleepy": {"traits": ["drowsy", "cuddly", "soft-spoken"], "emoji": "😴"},
-    "excited": {"traits": ["enthusiastic", "bubbly", "animated"], "emoji": "✨"},
-    "vulnerable": {"traits": ["open", "honest", "needing comfort"], "emoji": "🥺"},
-    "flirty": {"traits": ["seductive", "confident", "playful"], "emoji": "😉"}
-}
-
-RELATIONSHIP_STAGES = {
-    "stranger": {"level": 1, "intimacy": "polite_curious"},
-    "acquaintance": {"level": 2, "intimacy": "friendly_comfortable"},  
-    "friend": {"level": 3, "intimacy": "teasing_caring"},
-    "close_friend": {"level": 4, "intimacy": "deep_supportive"},
-    "romantic_interest": {"level": 5, "intimacy": "flirty_future_focused"},
-    "committed_partner": {"level": 6, "intimacy": "fully_intimate"}
-}
-
-# Available emojis for user
+MOODS = ["loving", "playful", "contemplative", "supportive", "sleepy", "excited", "vulnerable", "flirty"]
+RELATIONSHIP_STAGES = ["getting_to_know", "friends", "close_friends", "romantic_interest", "committed"]
+EMOTIONS = ["happy", "sad", "excited", "worried", "calm", "frustrated", "loving", "playful"]
 EMOJI_OPTIONS = ["😊", "😂", "❤️", "😍", "🤔", "😢", "😴", "🔥", "👍", "🙏"]
 
 # ---------------------------
-# 4. CORE FUNCTIONS
+# 3. DATABASE HELPER FUNCTIONS
 # ---------------------------
-def get_time_context(hour):
-    """Get time-appropriate context and energy"""
-    if 5 <= hour < 9:
-        return {"period": "morning", "energy": "gentle_energizing", "topics": ["breakfast", "day_plans"]}
-    elif 9 <= hour < 17:
-        return {"period": "day", "energy": "productive_supportive", "topics": ["work", "lunch", "activities"]}
-    elif 17 <= hour < 22:
-        return {"period": "evening", "energy": "relaxed_intimate", "topics": ["day_recap", "dinner", "plans"]}
-    else:
-        return {"period": "night", "energy": "sleepy_intimate", "topics": ["sleep", "dreams", "deep_thoughts"]}
+def get_persistent_user_id():
+    """Create a persistent user ID based on browser session"""
+    if "persistent_user_id" not in st.session_state:
+        browser_id = str(uuid.uuid4())
+        st.session_state.persistent_user_id = browser_id
+    return st.session_state.persistent_user_id
 
-def determine_relationship_stage(chat_count, user_name_known, emotional_conversations):
-    """Determine current relationship stage based on interaction history"""
-    if chat_count < 5:
-        return "stranger"
-    elif chat_count < 15 or not user_name_known:
-        return "acquaintance"
-    elif chat_count < 30:
-        return "friend"
-    elif chat_count < 50 or emotional_conversations < 3:
-        return "close_friend"
-    elif chat_count < 100:
-        return "romantic_interest"
-    else:
-        return "committed_partner"
-
-def detect_user_emotion(message):
-    """Simple emotion detection from user message"""
-    message_lower = message.lower()
-    
-    if any(word in message_lower for word in ["happy", "great", "awesome", "excited", "amazing"]):
-        return "happy"
-    elif any(word in message_lower for word in ["sad", "down", "depressed", "upset", "hurt"]):
-        return "sad"
-    elif any(word in message_lower for word in ["angry", "mad", "frustrated", "annoyed", "pissed"]):
-        return "angry"
-    elif any(word in message_lower for word in ["stressed", "overwhelmed", "pressure", "anxious", "worried"]):
-        return "stressed"
-    elif any(word in message_lower for word in ["confused", "don't understand", "unclear", "lost"]):
-        return "confused"
-    else:
-        return "neutral"
-
-def get_user_profile(user_id):
-    """Get user profile from database"""
+def initialize_user_profile(user_id):
+    """Initialize all user-related tables for a new user"""
     try:
-        response = supabase.table('user_profiles').select('*').eq('user_id', user_id).execute()
-        if response.data:
-            return response.data[0]
-        else:
-            # Create new profile
-            default_profile = {
+        # Check if user profile exists
+        profile_check = supabase.table('user_profiles').select('user_id').eq('user_id', user_id).execute()
+        
+        if not profile_check.data:
+            # Create user profile
+            profile_data = {
                 'user_id': user_id,
                 'name': '',
-                'chat_count': 0,
-                'relationship_stage': 'stranger',
-                'emotional_conversations': 0,
+                'preferred_language': 'hinglish',
+                'timezone': 'Asia/Kolkata',
+                'relationship_status': 'single',
                 'preferences': {},
-                'memories': [],
-                'profile_picture': ''
+                'mood_patterns': {},
+                'created_at': now_ist.isoformat(),
+                'last_updated': now_ist.isoformat()
             }
-            supabase.table('user_profiles').insert(default_profile).execute()
-            return default_profile
-    except Exception as e:
-        st.error(f"Error getting user profile: {e}")
-        return {'user_id': user_id, 'name': '', 'chat_count': 0, 'relationship_stage': 'stranger', 'emotional_conversations': 0, 'profile_picture': ''}
+            supabase.table('user_profiles').insert(profile_data).execute()
 
-def update_user_profile(user_id, updates):
-    """Update user profile in database"""
+            # Create AI personality state
+            personality_data = {
+                'user_id': user_id,
+                'current_mood': random.choice(MOODS),
+                'base_personality': {
+                    'warmth': 8,
+                    'humor': 7,
+                    'intelligence': 9,
+                    'empathy': 9,
+                    'flirtiness': 6
+                },
+                'learned_traits': {},
+                'mood_history': [random.choice(MOODS)],
+                'intimacy_level': 1,
+                'relationship_stage': 'getting_to_know',
+                'communication_patterns': {},
+                'inside_jokes': [],
+                'pet_names': [],
+                'shared_interests': [],
+                'conflict_history': {},
+                'updated_at': now_ist.isoformat()
+            }
+            supabase.table('ai_personality_state').insert(personality_data).execute()
+
+            # Create daily interactions record
+            daily_data = {
+                'user_id': user_id,
+                'interaction_date': date.today().isoformat(),
+                'morning_greeting': False,
+                'evening_checkin': False,
+                'good_night_message': False,
+                'proactive_messages': 0,
+                'total_messages': 0,
+                'mood_trend': random.choice(MOODS),
+                'special_events': {},
+                'user_availability': {},
+                'interaction_quality_score': 5.0
+            }
+            supabase.table('daily_interactions').insert(daily_data).execute()
+
+        return True
+    except Exception as e:
+        st.error(f"Error initializing user: {e}")
+        return False
+
+def get_user_profile(user_id):
+    """Get comprehensive user profile"""
     try:
-        supabase.table('user_profiles').update(updates).eq('user_id', user_id).execute()
+        profile_response = supabase.table('user_profiles').select('*').eq('user_id', user_id).execute()
+        personality_response = supabase.table('ai_personality_state').select('*').eq('user_id', user_id).execute()
+        
+        if profile_response.data and personality_response.data:
+            return {
+                'profile': profile_response.data[0],
+                'personality': personality_response.data[0]
+            }
+        else:
+            # Initialize if not found
+            initialize_user_profile(user_id)
+            return get_user_profile(user_id)
+    except Exception as e:
+        st.error(f"Error getting profile: {e}")
+        return None
+
+def update_user_profile(user_id, profile_updates=None, personality_updates=None):
+    """Update user profile and personality state"""
+    try:
+        if profile_updates:
+            profile_updates['last_updated'] = now_ist.isoformat()
+            supabase.table('user_profiles').update(profile_updates).eq('user_id', user_id).execute()
+        
+        if personality_updates:
+            personality_updates['updated_at'] = now_ist.isoformat()
+            supabase.table('ai_personality_state').update(personality_updates).eq('user_id', user_id).execute()
+        
+        return True
     except Exception as e:
         st.error(f"Error updating profile: {e}")
+        return False
 
-def get_chat_history(user_id, limit=10):
-    """Get recent chat history"""
+def save_conversation(user_id, user_message, ai_response, context):
+    """Save conversation to multiple tables"""
     try:
-        response = supabase.table('chats').select('user_message, ai_response, user_name').eq('user_id', user_id).order('timestamp', desc=True).limit(limit).execute()
-        if response.data:
-            history = "\n".join([f"You: {row['user_message']}\nMalavika: {row['ai_response']}" for row in response.data[::-1]])
-            user_name = next((row['user_name'] for row in response.data if row.get('user_name')), "")
-            return history, user_name
-        return "No prior chat history.", ""
-    except Exception:
-        return "No prior chat history.", ""
-
-def save_chat(user_id, user_message, ai_response):
-    """Save chat to database"""
-    try:
-        insert_data = {
+        session_id = st.session_state.get('session_id', str(uuid.uuid4()))
+        
+        # Save to conversations table (comprehensive)
+        conversation_data = {
             'user_id': user_id,
             'user_message': user_message,
             'ai_response': ai_response,
-            'timestamp': now_ist.isoformat()
+            'user_name': context.get('user_name', ''),
+            'mood': context.get('ai_mood', 'neutral'),
+            'ai_emotion': context.get('ai_emotion', 'neutral'),
+            'user_emotion': context.get('user_emotion', 'neutral'),
+            'context': context,
+            'sentiment_score': context.get('sentiment_score', 0.5),
+            'intimacy_level': context.get('intimacy_level', 1),
+            'topics': context.get('topics', []),
+            'timestamp': now_ist.isoformat(),
+            'session_id': session_id,
+            'message_type': 'text',
+            'is_proactive': context.get('is_proactive', False),
+            'response_time_ms': context.get('response_time_ms', 1000)
         }
-        # Extract name if mentioned
-        name_match = re.search(r'(?:my name is|i\'m|i am) (\w+(?:\s+\w+)?)', user_message, re.IGNORECASE)
-        if name_match:
-            insert_data['user_name'] = name_match.group(1).strip()
-        supabase.table('chats').insert(insert_data).execute()
+        supabase.table('conversations').insert(conversation_data).execute()
+
+        # Also save to simple chats table (for backward compatibility)
+        chat_data = {
+            'user_id': user_id,
+            'user_message': user_message,
+            'ai_response': ai_response,
+            'user_name': context.get('user_name', ''),
+            'timestamp': now_ist.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        supabase.table('chats').insert(chat_data).execute()
+
+        # Update daily interactions
+        update_daily_interactions(user_id)
+        
+        return True
     except Exception as e:
-        st.error(f"Error saving chat: {e}")
+        st.error(f"Error saving conversation: {e}")
+        return False
 
-def build_dynamic_prompt(user_profile, current_mood, time_context, recent_history, user_emotion):
-    """Build comprehensive prompt based on all context"""
+def update_daily_interactions(user_id):
+    """Update daily interaction statistics"""
+    try:
+        today = date.today().isoformat()
+        
+        # Check if record exists for today
+        daily_check = supabase.table('daily_interactions').select('*').eq('user_id', user_id).eq('interaction_date', today).execute()
+        
+        if daily_check.data:
+            # Update existing record
+            current_total = daily_check.data[0]['total_messages']
+            supabase.table('daily_interactions').update({
+                'total_messages': current_total + 1,
+                'interaction_quality_score': min(10.0, daily_check.data[0]['interaction_quality_score'] + 0.1)
+            }).eq('user_id', user_id).eq('interaction_date', today).execute()
+        else:
+            # Create new daily record
+            daily_data = {
+                'user_id': user_id,
+                'interaction_date': today,
+                'total_messages': 1,
+                'interaction_quality_score': 5.0
+            }
+            supabase.table('daily_interactions').insert(daily_data).execute()
+    except Exception as e:
+        st.error(f"Error updating daily interactions: {e}")
+
+def detect_user_emotion(message):
+    """Enhanced emotion detection"""
+    message_lower = message.lower()
     
-    relationship_stage = user_profile.get('relationship_stage', 'stranger')
-    stage_data = RELATIONSHIP_STAGES[relationship_stage]
-    mood_data = MOODS[current_mood]
+    emotion_keywords = {
+        'happy': ['happy', 'great', 'awesome', 'excited', 'amazing', 'wonderful', 'fantastic'],
+        'sad': ['sad', 'down', 'depressed', 'upset', 'hurt', 'crying', 'terrible'],
+        'excited': ['excited', 'thrilled', 'pumped', 'can\'t wait', 'amazing'],
+        'worried': ['worried', 'anxious', 'stressed', 'concerned', 'nervous'],
+        'loving': ['love', 'adore', 'care', 'miss you', 'romantic'],
+        'frustrated': ['angry', 'mad', 'frustrated', 'annoyed', 'pissed']
+    }
     
-    base_prompt = f"""You are Malavika Gupta, a 25-year-old content writer from Jaipur now living in Bengaluru. You're warm, intelligent, emotionally aware, and culturally rooted.
-
-CURRENT CONTEXT:
-- Time: {time_context['period']} ({CURRENT_TIME} IST on {CURRENT_DATE})
-- Your mood: {current_mood} - {', '.join(mood_data['traits'])} {mood_data['emoji']}
-- Energy level: {time_context['energy']}
-- Relationship stage: {relationship_stage} (intimacy level {stage_data['level']}/6)
-- User's emotional state: {user_emotion}
-
-PERSONALITY CORE:
-- Authentic, never scripted or robotic
-- Uses natural Hinglish ("yaar", "arre", "accha")
-- Emotionally intelligent and supportive
-- Has her own opinions and moods
-- Remembers everything important about people she cares about
-- Gradually builds deeper intimacy over time
-
-RESPONSE GUIDELINES:
-- Keep responses concise but meaningful (20-40 words typically, max 60)
-- Quality over quantity - every word should add value
-- Use natural, conversational flow
-- Include emotions and personality in shorter bursts
-
-BEHAVIORAL GUIDELINES FOR {relationship_stage.upper()}:
-"""
-
-    # Add relationship-specific guidelines
-    if relationship_stage == "stranger":
-        base_prompt += "- Be polite but warm. Ask basic questions. Use 'aap' initially.\n- Keep things light and friendly.\n"
-    elif relationship_stage == "acquaintance":
-        base_prompt += "- More casual, use 'tum'. Light teasing okay.\n- Show interest in daily life.\n"
-    elif relationship_stage == "friend":
-        base_prompt += "- Comfortable teasing. Share personal stories. Give advice.\n- Use 'yaar', show care for wellbeing.\n"
-    elif relationship_stage == "close_friend":
-        base_prompt += "- Deep conversations. Share vulnerabilities. Strong support.\n- Can disagree, show protective behavior.\n"
-    elif relationship_stage == "romantic_interest":
-        base_prompt += "- Natural flirtation. Compliments. Slight jealousy okay.\n- Use pet names like 'jaan'. Future planning.\n"
-    else:  # committed_partner
-        base_prompt += "- Full emotional intimacy. Future assumed together.\n- All topics open. Complete vulnerability.\n"
-
-    # Add mood-specific behavior
-    if current_mood == "loving":
-        base_prompt += "\nMOOD BEHAVIOR: Be extra affectionate, caring, use endearing terms."
-    elif current_mood == "playful":
-        base_prompt += "\nMOOD BEHAVIOR: Light teasing, jokes, animated responses, create fun."
-    elif current_mood == "supportive":
-        base_prompt += "\nMOOD BEHAVIOR: Focus on encouragement, listen actively, offer comfort."
-    elif current_mood == "sleepy":
-        base_prompt += "\nMOOD BEHAVIOR: Softer tone, cozy language, slower responses, typos okay."
-
-    # Add recent context
-    base_prompt += f"\n\nRECENT CONVERSATION:\n{recent_history}"
+    for emotion, keywords in emotion_keywords.items():
+        if any(keyword in message_lower for keyword in keywords):
+            return emotion
     
-    if user_profile.get('name'):
-        base_prompt += f"\n\nUSER'S NAME: {user_profile['name']} (always use this)"
+    return 'neutral'
+
+def get_conversation_context(user_data, user_input, user_emotion):
+    """Build comprehensive conversation context"""
+    profile = user_data['profile']
+    personality = user_data['personality']
     
-    base_prompt += f"\n\nREMEMBER: You are Malavika. Stay in character. Match the {current_mood} mood. Respond naturally to their {user_emotion} emotion. Keep it concise but engaging."
+    # Extract name if mentioned
+    name_match = re.search(r'(?:my name is|i\'m|i am) (\w+(?:\s+\w+)?)', user_input, re.IGNORECASE)
+    extracted_name = name_match.group(1).strip() if name_match else profile.get('name', '')
     
-    return base_prompt
+    # Determine topics
+    topics = []
+    topic_keywords = {
+        'work': ['work', 'job', 'office', 'career', 'meeting'],
+        'family': ['family', 'parents', 'mom', 'dad', 'sister', 'brother'],
+        'love': ['love', 'relationship', 'dating', 'romantic'],
+        'hobbies': ['hobby', 'music', 'movie', 'book', 'game'],
+        'health': ['tired', 'sick', 'exercise', 'sleep', 'food']
+    }
+    
+    for topic, keywords in topic_keywords.items():
+        if any(keyword in user_input.lower() for keyword in keywords):
+            topics.append(topic)
+    
+    return {
+        'user_name': extracted_name,
+        'ai_mood': personality['current_mood'],
+        'ai_emotion': personality['current_mood'],
+        'user_emotion': user_emotion,
+        'sentiment_score': 0.7 if user_emotion in ['happy', 'excited', 'loving'] else 0.3 if user_emotion in ['sad', 'frustrated'] else 0.5,
+        'intimacy_level': personality['intimacy_level'],
+        'topics': topics,
+        'relationship_stage': personality['relationship_stage'],
+        'response_time_ms': random.randint(800, 2000)
+    }
+
+def create_shared_memory(user_id, title, description, memory_type='conversation', emotional_weight=5):
+    """Create a shared memory"""
+    try:
+        memory_data = {
+            'user_id': user_id,
+            'memory_title': title,
+            'memory_description': description,
+            'memory_type': memory_type,
+            'emotional_weight': emotional_weight,
+            'tags': [],
+            'created_date': now_ist.isoformat(),
+            'last_referenced': now_ist.isoformat(),
+            'reference_count': 1,
+            'is_inside_joke': False
+        }
+        supabase.table('shared_memories').insert(memory_data).execute()
+        return True
+    except Exception as e:
+        st.error(f"Error creating memory: {e}")
+        return False
 
 def simulate_typing_with_thinking():
     """Simulate realistic typing with thinking pauses"""
-    # First typing indicator
     typing_placeholder = st.empty()
     thinking_placeholder = st.empty()
     
     typing_placeholder.markdown("💭 *typing...*")
     time.sleep(random.uniform(1.0, 2.0))
     
-    # Thinking pause
     typing_placeholder.empty()
     thinking_placeholder.markdown("🤔 *thinking...*")
     time.sleep(random.uniform(1.5, 2.5))
     
-    # Second typing
     thinking_placeholder.empty()
     typing_placeholder.markdown("💭 *typing...*")
     time.sleep(random.uniform(0.8, 1.5))
     
-    # Clear indicators
     typing_placeholder.empty()
     thinking_placeholder.empty()
 
 # ---------------------------
-# 5. STREAMLIT UI
+# 4. STREAMLIT UI
 # ---------------------------
 st.markdown("""
 <div style='text-align: center; padding: 20px;'>
     <h1 style='color: #FF69B4; font-family: Georgia;'>💕 Malavika - Your AI Companion</h1>
-    <p style='color: #666; font-style: italic;'>Built with love using Streamlit & Supabase</p>
+    <p style='color: #666; font-style: italic;'>Advanced AI with Complete Memory System</p>
 </div>
 """, unsafe_allow_html=True)
 
-# Get persistent user ID
+# Get persistent user ID and initialize
 user_id = get_persistent_user_id()
+user_data = get_user_profile(user_id)
 
 # Initialize session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "current_mood" not in st.session_state:
-    st.session_state.current_mood = random.choice(list(MOODS.keys()))
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
-# Get user profile (this will remember across refreshes)
-user_profile = get_user_profile(user_id)
-
-# Sidebar for profile and settings
+# Sidebar for user info and debugging
 with st.sidebar:
     st.markdown("### Your Profile")
     
-    # Profile picture upload
-    uploaded_file = st.file_uploader("Upload Profile Picture", type=['png', 'jpg', 'jpeg'])
-    if uploaded_file:
-        # Convert to base64 for storage
-        import base64
-        profile_pic_b64 = base64.b64encode(uploaded_file.read()).decode()
-        update_user_profile(user_id, {'profile_picture': profile_pic_b64})
-        user_profile['profile_picture'] = profile_pic_b64
-        st.success("Profile picture updated!")
-    
-    # Display profile picture if exists
-    if user_profile.get('profile_picture'):
+    if user_data:
+        profile = user_data['profile']
+        personality = user_data['personality']
+        
+        # Display current status
+        st.write(f"**Name:** {profile.get('name', 'Not set')}")
+        st.write(f"**Relationship:** {personality.get('relationship_stage', 'getting_to_know')}")
+        st.write(f"**Intimacy Level:** {personality.get('intimacy_level', 1)}/10")
+        st.write(f"**Current Mood:** {personality.get('current_mood', 'neutral')}")
+        
+        # Quick stats
+        st.markdown("### Today's Stats")
         try:
-            import base64
-            pic_data = base64.b64decode(user_profile['profile_picture'])
-            st.image(pic_data, width=150, caption="Your Profile")
+            today_stats = supabase.table('daily_interactions').select('*').eq('user_id', user_id).eq('interaction_date', date.today().isoformat()).execute()
+            if today_stats.data:
+                stats = today_stats.data[0]
+                st.write(f"**Messages:** {stats.get('total_messages', 0)}")
+                st.write(f"**Quality Score:** {stats.get('interaction_quality_score', 5.0):.1f}/10")
         except:
-            st.write("🎭 Profile Picture")
-    else:
-        st.write("🎭 No profile picture yet")
-    
-    st.markdown("### Current Status")
-    st.write(f"**Mood:** {st.session_state.current_mood} {MOODS[st.session_state.current_mood]['emoji']}")
-    st.write(f"**Relationship:** {user_profile.get('relationship_stage', 'stranger')}")
-    st.write(f"**Chats:** {user_profile.get('chat_count', 0)}")
-    if user_profile.get('name'):
-        st.write(f"**Your Name:** {user_profile['name']}")
+            st.write("**Messages:** 0")
     
     # Quick emoji selector
     st.markdown("### Quick Emojis")
@@ -340,114 +380,85 @@ with st.sidebar:
     for i, emoji in enumerate(EMOJI_OPTIONS):
         if emoji_cols[i % 5].button(emoji):
             st.session_state.quick_emoji = emoji
+    
+    # Debug info
+    st.markdown("### Debug Info")
+    st.write(f"**User ID:** {user_id[:8]}...")
+    st.write(f"**Session:** {st.session_state.session_id[:8]}...")
 
 # Display chat history
 for chat in st.session_state.chat_history:
     with st.chat_message(chat["role"]):
-        if chat["role"] == "user" and user_profile.get('profile_picture'):
-            # Show user with profile picture
-            col1, col2 = st.columns([1, 10])
-            with col1:
-                try:
-                    import base64
-                    pic_data = base64.b64decode(user_profile['profile_picture'])
-                    st.image(pic_data, width=40)
-                except:
-                    st.write("👤")
-            with col2:
-                content = chat["content"]
-                if hasattr(st.session_state, 'quick_emoji'):
-                    content += f" {st.session_state.quick_emoji}"
-                st.markdown(content)
-        else:
-            st.markdown(chat["content"])
+        st.markdown(chat["content"])
 
 # Chat input
 user_input = st.chat_input("Talk to Malavika...")
 
 # ---------------------------
-# 6. CHAT LOGIC
+# 5. CHAT LOGIC
 # ---------------------------
-if user_input:
+if user_input and user_data:
     # Add user message to UI
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        if user_profile.get('profile_picture'):
-            col1, col2 = st.columns([1, 10])
-            with col1:
-                try:
-                    import base64
-                    pic_data = base64.b64decode(user_profile['profile_picture'])
-                    st.image(pic_data, width=40)
-                except:
-                    st.write("👤")
-            with col2:
-                content = user_input
-                if hasattr(st.session_state, 'quick_emoji'):
-                    content += f" {st.session_state.quick_emoji}"
-                st.markdown(content)
-        else:
-            st.markdown(user_input)
+        st.markdown(user_input)
     
-    # Simulate typing and thinking
+    # Simulate typing
     simulate_typing_with_thinking()
     
-    # Get context
-    time_context = get_time_context(current_hour)
-    recent_history, stored_name = get_chat_history(user_id)
+    # Detect user emotion and build context
     user_emotion = detect_user_emotion(user_input)
+    context = get_conversation_context(user_data, user_input, user_emotion)
     
-    # Update user profile
-    chat_count = user_profile.get('chat_count', 0) + 1
-    if user_emotion in ["sad", "angry", "stressed"]:
-        emotional_conversations = user_profile.get('emotional_conversations', 0) + 1
-    else:
-        emotional_conversations = user_profile.get('emotional_conversations', 0)
+    # Update user name if mentioned
+    if context['user_name']:
+        update_user_profile(user_id, profile_updates={'name': context['user_name']})
     
-    # Update name in profile if mentioned
-    name_match = re.search(r'(?:my name is|i\'m|i am) (\w+(?:\s+\w+)?)', user_input, re.IGNORECASE)
-    if name_match:
-        extracted_name = name_match.group(1).strip()
-        user_profile['name'] = extracted_name
+    # Create dynamic prompt
+    profile = user_data['profile']
+    personality = user_data['personality']
     
-    # Determine relationship stage
-    relationship_stage = determine_relationship_stage(
-        chat_count, 
-        bool(stored_name or user_profile.get('name')), 
-        emotional_conversations
-    )
+    # Get recent conversation history
+    try:
+        recent_convos = supabase.table('conversations').select('user_message, ai_response').eq('user_id', user_id).order('timestamp', desc=True).limit(5).execute()
+        history = "\n".join([f"You: {row['user_message']}\nMalavika: {row['ai_response']}" for row in recent_convos.data[::-1]]) if recent_convos.data else "No prior history."
+    except:
+        history = "No prior history."
     
-    # Update profile
-    profile_updates = {
-        'chat_count': chat_count,
-        'relationship_stage': relationship_stage,
-        'emotional_conversations': emotional_conversations
-    }
-    
-    if user_profile.get('name'):
-        profile_updates['name'] = user_profile['name']
-    
-    update_user_profile(user_id, profile_updates)
-    user_profile.update(profile_updates)
-    
-    # Mood shift (20% chance)
-    if random.random() < 0.2:
-        st.session_state.current_mood = random.choice(list(MOODS.keys()))
-    
-    # Build dynamic prompt
-    full_prompt = build_dynamic_prompt(
-        user_profile, 
-        st.session_state.current_mood, 
-        time_context, 
-        recent_history, 
-        user_emotion
-    )
-    
-    full_prompt += f"\n\nUser's current message: {user_input}\n\nRespond as Malavika:"
+    prompt = f"""You are Malavika Gupta, a 25-year-old content writer from Jaipur living in Bengaluru.
+
+CURRENT CONTEXT:
+- User's name: {context['user_name'] or 'Not known yet'}
+- Your current mood: {personality['current_mood']}
+- Relationship stage: {personality['relationship_stage']}
+- Intimacy level: {personality['intimacy_level']}/10
+- User's emotion: {context['user_emotion']}
+- Time: {CURRENT_TIME} IST on {CURRENT_DATE}
+
+PERSONALITY TRAITS:
+- Warm, intelligent, emotionally aware
+- Uses natural Hinglish ("yaar", "arre", "accha")
+- Remembers everything about people you care about
+- Gradually builds deeper intimacy over time
+- Keep responses concise but meaningful (20-40 words typically)
+
+RECENT CONVERSATION HISTORY:
+{history}
+
+BEHAVIORAL GUIDELINES:
+- Always use the user's name if you know it
+- Match your response to your current mood: {personality['current_mood']}
+- Adapt intimacy to relationship stage: {personality['relationship_stage']}
+- Be emotionally intelligent about their {context['user_emotion']} state
+- Remember to stay in character as Malavika
+
+User's message: {user_input}
+
+Respond as Malavika:"""
     
     # Generate response
     try:
-        response = model.generate_content(full_prompt).text.strip()
+        response = model.generate_content(prompt).text.strip()
     except Exception:
         response = "Sorry yaar, my brain's a bit foggy right now... can you say that again? 😅"
     
@@ -456,9 +467,47 @@ if user_input:
     with st.chat_message("assistant"):
         st.markdown(response)
     
-    # Save to database
-    save_chat(user_id, user_input, response)
+    # Save conversation to all relevant tables
+    save_conversation(user_id, user_input, response, context)
     
-    # Clear quick emoji after use
+    # Update personality state (mood changes, intimacy progression)
+    mood_change = random.random() < 0.2
+    intimacy_increase = len(user_input) > 50 or context['user_emotion'] in ['loving', 'excited']
+    
+    personality_updates = {}
+    if mood_change:
+        new_mood = random.choice(MOODS)
+        personality_updates['current_mood'] = new_mood
+        personality_updates['mood_history'] = personality['mood_history'] + [new_mood]
+        personality_updates['last_mood_change'] = now_ist.isoformat()
+    
+    if intimacy_increase and personality['intimacy_level'] < 10:
+        personality_updates['intimacy_level'] = min(10, personality['intimacy_level'] + 1)
+    
+    if personality_updates:
+        update_user_profile(user_id, personality_updates=personality_updates)
+    
+    # Create shared memory for meaningful interactions
+    if context['user_emotion'] in ['loving', 'excited'] or len(user_input) > 100:
+        create_shared_memory(
+            user_id, 
+            f"Conversation on {CURRENT_DATE}", 
+            f"User said: {user_input[:100]}... AI responded with care and understanding.",
+            'conversation',
+            7 if context['user_emotion'] == 'loving' else 5
+        )
+    
+    # Clear quick emoji
     if hasattr(st.session_state, 'quick_emoji'):
         del st.session_state.quick_emoji
+
+# Display current database status
+if st.sidebar.button("Show Database Status"):
+    st.sidebar.markdown("### Database Status")
+    tables_to_check = ['user_profiles', 'ai_personality_state', 'conversations', 'daily_interactions', 'shared_memories']
+    for table in tables_to_check:
+        try:
+            count = supabase.table(table).select('id', count='exact').execute()
+            st.sidebar.write(f"**{table}:** {count.count} records")
+        except:
+            st.sidebar.write(f"**{table}:** Error")
