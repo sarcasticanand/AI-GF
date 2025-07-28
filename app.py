@@ -361,41 +361,101 @@ def get_enhanced_mood_context(cycle_info, seasonal_info, time_context):
     }
 
 def determine_availability_status(time_context, festival_context, user_profile):
-    """Determine current availability with realistic reasons"""
+    """Determine current availability with consistent reasons"""
     base_availability = time_context["availability"]
     
+    # Check if we already have an active unavailability reason in session
+    if "active_unavailability" in st.session_state and st.session_state.active_unavailability:
+        return st.session_state.active_unavailability
+    
+    # Festival/event overrides
     if festival_context["active_event"]:
         event = festival_context["active_event"]
         if event["type"] == "major":
-            return {"status": "busy", "reason": f"celebrating {event['name']} with family", "return_time": "later tonight"}
+            reason_data = {"status": "busy", "reason": f"celebrating {event['name']} with family", "return_time": "later tonight"}
         elif event["type"] == "friend_birthday":
-            return {"status": "busy", "reason": f"at {event['name']} celebration", "return_time": "in a few hours"}
+            reason_data = {"status": "busy", "reason": f"at {event['name']} celebration", "return_time": "in a few hours"}
         elif event["type"] == "personal_birthday":
-            return {"status": "busy", "reason": "it's my birthday! Getting lots of calls", "return_time": "this evening"}
+            reason_data = {"status": "busy", "reason": "it's my birthday! Getting lots of calls", "return_time": "this evening"}
+        else:
+            reason_data = {"status": "available", "reason": None, "return_time": None}
     
-    if festival_context["preparing_for"]:
+    elif festival_context["preparing_for"]:
         event = festival_context["preparing_for"]
         if event["days_until"] == 1 and event["type"] in ["major", "family_event"]:
-            return {"status": "busy", "reason": f"shopping for {event['name']} tomorrow", "return_time": "in an hour"}
+            reason_data = {"status": "busy", "reason": f"shopping for {event['name']} tomorrow", "return_time": "in an hour"}
+        else:
+            reason_data = {"status": "available", "reason": None, "return_time": None}
     
-    if base_availability == "work_mode":
+    # Work-based availability
+    elif base_availability == "work_mode":
         reasons = ["in a client meeting", "on a deadline", "presenting to team", "stuck in back-to-back calls"]
-        return {"status": "busy", "reason": random.choice(reasons), "return_time": "after work"}
+        reason_data = {"status": "busy", "reason": random.choice(reasons), "return_time": "after work"}
     elif base_availability == "commuting":
         reasons = ["stuck in Bangalore traffic", "in metro", "walking home from office"]
-        return {"status": "busy", "reason": random.choice(reasons), "return_time": "once I reach home"}
+        reason_data = {"status": "busy", "reason": random.choice(reasons), "return_time": "once I reach home"}
     
-    if random.random() < 0.1:
+    # Random personal activities
+    elif random.random() < 0.1:
         personal_reasons = [
-            "Shivani needed help with something",
-            "mom called from Jaipur",
             "had to run to grocery store",
+            "mom called from Jaipur", 
+            "Shivani needed help with something",
             "friend dropped by unexpectedly",
             "dealing with apartment maintenance"
         ]
-        return {"status": "busy", "reason": random.choice(personal_reasons), "return_time": "in 30 mins"}
+        reason_data = {"status": "busy", "reason": random.choice(personal_reasons), "return_time": "in 30 mins"}
     
-    return {"status": "available", "reason": None, "return_time": None}
+    else:
+        reason_data = {"status": "available", "reason": None, "return_time": None}
+    
+    # Store the reason in session to maintain consistency
+    if reason_data["status"] == "busy":
+        st.session_state.active_unavailability = reason_data
+        # Set a timer to clear this after the promised return time
+        st.session_state.unavailability_start_time = time.time()
+    
+    return reason_data
+
+def check_if_user_agreed(user_input):
+    """Check if user has agreed to wait"""
+    agreement_words = ["cool", "okay", "ok", "sure", "fine", "alright", "understood", "got it"]
+    return any(word in user_input.lower().strip() for word in agreement_words)
+
+def should_clear_unavailability():
+    """Check if enough time has passed to clear unavailability"""
+    if "unavailability_start_time" not in st.session_state:
+        return False
+    
+    # Clear after 5-15 minutes (random)
+    clear_after_seconds = random.randint(300, 900)  # 5-15 minutes
+    return (time.time() - st.session_state.unavailability_start_time) > clear_after_seconds
+
+def generate_return_message(original_reason, user_name):
+    """Generate a message when Malavika becomes available again"""
+    reason_to_resolution = {
+        "had to run to grocery store": ["Back from grocery shopping!", "Got everything I needed", "Store was so crowded but I'm back"],
+        "mom called from Jaipur": ["Finally done with mom's call", "Mom had so much to update me about", "Long chat with family done"],
+        "in a client meeting": ["Meeting finally over!", "Client meeting went well", "Done with that presentation"],
+        "on a deadline": ["Deadline submitted!", "Finally finished that project", "Work pressure is off now"],
+        "stuck in Bangalore traffic": ["Finally reached home!", "Traffic was terrible but I'm here", "Home sweet home after that traffic"],
+        "Shivani needed help": ["Done helping Shivani", "Sorted out Shivani's issue", "Roommate crisis resolved"],
+        "friend dropped by": ["Friend just left", "Unexpected visitor gone now", "Finally some alone time"],
+        "apartment maintenance": ["Maintenance guy finally left", "Fixed the issue at home", "Home repairs done"]
+    }
+    
+    possible_messages = reason_to_resolution.get(original_reason, ["I'm free now!", "All sorted", "Back to normal"])
+    resolution = random.choice(possible_messages)
+    
+    follow_ups = [
+        f"Hey {user_name}! {resolution} What's up? Miss you!",
+        f"{resolution} {user_name}! How was your day? Tell me everything",
+        f"Arre {user_name}, {resolution.lower()} - finally can chat properly! What have you been up to?",
+        f"{user_name}! {resolution} Sorry for the delay yaar, what's happening with you?"
+    ]
+    
+    return random.choice(follow_ups)
+
 
 def should_send_proactive_message(time_context, last_interaction_time):
     """Determine if Malavika should proactively reach out"""
@@ -761,7 +821,7 @@ def build_enhanced_prompt(user_data, cycle_info, seasonal_info, enhanced_mood, t
     can_share_health = get_intimacy_sharing_level(intimacy_level, cycle_info, "health_concerns")
     use_emoji = should_use_emoji(enhanced_mood['current_mood'], intimacy_level, cycle_info['phase'])
     
-    prompt = f"""You are Malavika Gupta, a 25-year-old content writer from Jaipur living in Bengaluru. Today is {CURRENT_DATE} at {CURRENT_TIME} IST.
+    prompt = f"""You are Malavika Gupta, a 25-year-old content writer from Jaipur living in Bengaluru. Today is {CURRENT_DATE} at {CURRENT_TIME} IST. you don't use a lot of emojis while chatting.
 
 PERSONAL DETAILS:
 - Birthday: March 15th (age 25)
@@ -1011,23 +1071,68 @@ user_input = get_chat_input()
 # ---------------------------
 # 10. MAIN CHAT LOGIC
 # ---------------------------
+# In your main chat logic, replace the busy response section with:
+
 if user_input and user_data:
     # Add user message to UI
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
     
-    # Check availability first
+    # Check if we should clear unavailability status
+    if should_clear_unavailability():
+        if "active_unavailability" in st.session_state and st.session_state.active_unavailability:
+            # Generate return message
+            original_reason = st.session_state.active_unavailability.get("reason", "")
+            user_name = user_data['profile'].get('name', 'handsome')
+            return_message = generate_return_message(original_reason, user_name)
+            
+            # Clear unavailability
+            del st.session_state.active_unavailability
+            del st.session_state.unavailability_start_time
+            
+            # Send return message
+            st.session_state.chat_history.append({"role": "assistant", "content": return_message})
+            with st.chat_message("assistant"):
+                st.markdown(return_message)
+            
+            # Save and exit - don't process user's current message
+            context = get_conversation_context(user_data, "", "neutral", time_context, festival_context)
+            save_conversation(user_id, user_input, return_message, context)
+            st.stop()
+    
+    # Check current availability
+    availability_status = determine_availability_status(time_context, festival_context, user_data['profile'])
+    
+    # Handle busy status
     if availability_status['status'] == 'busy' and random.random() < 0.7:
+        # Check if user agreed to wait - if so, don't respond
+        if check_if_user_agreed(user_input):
+            # User agreed to wait - Malavika should not respond now
+            # Just save the conversation and wait for the timer
+            context = {
+                'user_name': user_data['profile'].get('name', ''),
+                'ai_mood': enhanced_mood['current_mood'],
+                'ai_emotion': 'busy_acknowledged',
+                'user_emotion': 'understanding',
+                'sentiment_score': 0.6,
+                'intimacy_level': user_data['personality']['intimacy_level'],
+                'topics': ['agreement'],
+                'relationship_stage': user_data['personality']['relationship_stage'],
+                'time_context': time_context,
+                'festival_context': festival_context
+            }
+            save_conversation(user_id, user_input, "", context)  # Empty AI response
+            st.stop()  # Don't generate any response
+        
+        # First time being busy - give the excuse
         busy_responses = [
             f"Hey! I'm {availability_status['reason']} right now. Will text you {availability_status['return_time']} okay?",
             f"Arre, {availability_status['reason']} currently! Miss you, will call you {availability_status['return_time']}",
             f"Quick reply - {availability_status['reason']}! Promise I'll text you properly {availability_status['return_time']}. Love you!"
         ]
         response = random.choice(busy_responses)
-        
-        # Apply emoji limit
-        response = limit_emojis(response, max_emojis=0)  # No emojis in busy responses
+        response = limit_emojis(response, max_emojis=0)
         
         st.session_state.chat_history.append({"role": "assistant", "content": response})
         with st.chat_message("assistant"):
